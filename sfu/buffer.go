@@ -1,10 +1,10 @@
 package sfu
 
 import (
-	"Pion-SFU/sfu/log"
 	"fmt"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	"miniSFU/sfu/log"
 	"sync"
 )
 

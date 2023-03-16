@@ -1,12 +1,12 @@
 package sfu
 
 import (
-	"Pion-SFU/sfu/log"
 	"fmt"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"io"
+	"miniSFU/sfu/log"
 	"sync"
 	"time"
 )
@@ -27,7 +27,7 @@ const (
 
 // Receiver defines a interface for a track receiver
 type Receiver interface {
-	Track() *webrtc.TrackRemote
+	Track() *webrtc.Track
 	GetPacket(sn uint16) *rtp.Packet
 	ReadRTP() (*rtp.Packet, error)
 	ReadRTCP() (rtcp.Packet, error)
@@ -44,13 +44,13 @@ type rtpExtInfo struct {
 
 // WebRTCAudioReceiver receives a audio track
 type WebRTCAudioReceiver struct {
-	track *webrtc.TrackRemote
+	track *webrtc.Track
 	stop  bool
 	rtpCh chan *rtp.Packet
 }
 
 // NewWebRTCAudioReceiver creates a new audio track receiver
-func NewWebRTCAudioReceiver(track *webrtc.TrackRemote) *WebRTCAudioReceiver {
+func NewWebRTCAudioReceiver(track *webrtc.Track) *WebRTCAudioReceiver {
 	a := &WebRTCAudioReceiver{
 		track: track,
 		rtpCh: make(chan *rtp.Packet, maxSize),
@@ -64,7 +64,7 @@ func (a *WebRTCAudioReceiver) ReadRTP() (*rtp.Packet, error) {
 	if a.stop {
 		return nil, errReceiverClosed
 	}
-	rtpPacket, _, err := a.track.ReadRTP()
+	rtpPacket, err := a.track.ReadRTP()
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (a *WebRTCAudioReceiver) WriteRTCP(pkt rtcp.Packet) error {
 }
 
 // Track returns receiver track
-func (a *WebRTCAudioReceiver) Track() *webrtc.TrackRemote {
+func (a *WebRTCAudioReceiver) Track() *webrtc.Track {
 	return a.track
 }
 
@@ -105,7 +105,7 @@ func (a *WebRTCAudioReceiver) stats() string {
 // videoTrack will use buffer, so that rtcp will be used
 type WebRTCVideoReceiver struct {
 	buffer         *Buffer
-	track          *webrtc.TrackRemote
+	track          *webrtc.Track
 	bandwidth      uint64
 	lostRate       float64
 	stop           bool
@@ -135,7 +135,7 @@ type WebRTCVideoReceiverConfig struct {
 	MaxBufferTime int `mapstructure:"maxbuffertime"`
 }
 
-func NewWebRTCVideoReceiver(config WebRTCVideoReceiverConfig, track *webrtc.TrackRemote) *WebRTCVideoReceiver {
+func NewWebRTCVideoReceiver(config WebRTCVideoReceiverConfig, track *webrtc.Track) *WebRTCVideoReceiver {
 	v := &WebRTCVideoReceiver{
 		buffer: NewBuffer(uint32(track.SSRC()), uint8(track.PayloadType()), BufferOptions{
 			BufferTime: config.MaxBufferTime,
@@ -193,7 +193,7 @@ func (v *WebRTCVideoReceiver) WriteRTCP(pkt rtcp.Packet) error {
 }
 
 // Track returns receiver track
-func (v *WebRTCVideoReceiver) Track() *webrtc.TrackRemote {
+func (v *WebRTCVideoReceiver) Track() *webrtc.Track {
 	return v.track
 }
 
@@ -222,7 +222,7 @@ func (v *WebRTCVideoReceiver) receiveRTP() {
 			return
 		}
 		v.mu.RUnlock()
-		pkt, _, err := v.track.ReadRTP()
+		pkt, err := v.track.ReadRTP()
 		log.Tracef("got packet %v", pkt)
 		if err != nil {
 			if err == io.EOF {

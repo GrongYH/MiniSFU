@@ -1,90 +1,95 @@
 package sfu
 
 import (
+	"fmt"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
+	"strconv"
+	"strings"
 )
 
-const frameMarking = "urn:ietf:params:rtp-hdrext:framemarking"
+const (
+	mediaNameAudio = "audio"
+	mediaNameVideo = "video"
+)
+
+var (
+	rtcpfb = []webrtc.RTCPFeedback{
+		{Type: webrtc.TypeRTCPFBGoogREMB},
+		{Type: webrtc.TypeRTCPFBCCM},
+		{Type: webrtc.TypeRTCPFBNACK},
+		{Type: "nack pli"},
+		{Type: webrtc.TypeRTCPFBTransportCC},
+	}
+)
 
 // MediaEngine handles stream codecs
 type MediaEngine struct {
 	webrtc.MediaEngine
 }
 
-func getMediaEngine() (*webrtc.MediaEngine, error) {
-	me := &webrtc.MediaEngine{}
-	if err := me.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1", RTCPFeedback: nil},
-		PayloadType:        111,
-	}, webrtc.RTPCodecTypeAudio); err != nil {
-		return nil, err
+func (e *MediaEngine) PopulateFromSDP(sd webrtc.SessionDescription) error {
+	sdp := sdp.SessionDescription{}
+	if err := sdp.Unmarshal([]byte(sd.SDP)); err != nil {
+		return err
 	}
 
-	videoRTCPFeedback := []webrtc.RTCPFeedback{
-		{Type: webrtc.TypeRTCPFBGoogREMB, Parameter: ""},
-		{Type: webrtc.TypeRTCPFBCCM, Parameter: "fir"},
-		{Type: webrtc.TypeRTCPFBNACK, Parameter: ""},
-		{Type: webrtc.TypeRTCPFBNACK, Parameter: "pli"},
-	}
-	for _, codec := range []webrtc.RTPCodecParameters{
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        96,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "profile-id=0", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        98,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000, SDPFmtpLine: "profile-id=1", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        100,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        102,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        127,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        125,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        108,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032", RTCPFeedback: videoRTCPFeedback},
-			PayloadType:        123,
-		},
-	} {
-		if err := me.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
-			return nil, err
+	for _, md := range sdp.MediaDescriptions {
+		if md.MediaName.Media != mediaNameAudio && md.MediaName.Media != mediaNameVideo {
+			continue
+		}
+
+		for _, format := range md.MediaName.Formats {
+			pt, err := strconv.Atoi(format)
+			if err != nil {
+				return fmt.Errorf("format parse error")
+			}
+
+			payloadType := uint8(pt)
+			payloadCodec, err := sdp.GetCodecForPayloadType(payloadType)
+			if err != nil {
+				return fmt.Errorf("could not find codec for payload type %d", payloadType)
+			}
+
+			var codec *webrtc.RTPCodec
+			switch {
+			case strings.EqualFold(payloadCodec.Name, webrtc.Opus):
+				codec = webrtc.NewRTPOpusCodec(payloadType, payloadCodec.ClockRate)
+			case strings.EqualFold(payloadCodec.Name, webrtc.VP8):
+				codec = webrtc.NewRTPVP8CodecExt(payloadType, payloadCodec.ClockRate, rtcpfb, payloadCodec.Fmtp)
+			case strings.EqualFold(payloadCodec.Name, webrtc.VP9):
+				codec = webrtc.NewRTPVP9CodecExt(payloadType, payloadCodec.ClockRate, rtcpfb, payloadCodec.Fmtp)
+			case strings.EqualFold(payloadCodec.Name, webrtc.H264):
+				codec = webrtc.NewRTPH264CodecExt(payloadType, payloadCodec.ClockRate, rtcpfb, payloadCodec.Fmtp)
+			default:
+				// ignoring other codecs
+				continue
+			}
+
+			e.RegisterCodec(codec)
 		}
 	}
 
-	for _, extension := range []string{
-		sdp.SDESMidURI,
-		sdp.SDESRTPStreamIDURI,
-		sdp.TransportCCURI,
-		frameMarking,
-	} {
-		if err := me.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: extension}, webrtc.RTPCodecTypeVideo); err != nil {
-			return nil, err
-		}
-	}
-	for _, extension := range []string{
-		sdp.SDESMidURI,
-		sdp.SDESRTPStreamIDURI,
-		sdp.AudioLevelURI,
-	} {
-		if err := me.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: extension}, webrtc.RTPCodecTypeAudio); err != nil {
-			return nil, err
-		}
+	// Use defaults for codecs not provided in sdp
+	if len(e.GetCodecsByName(webrtc.Opus)) == 0 {
+		codec := webrtc.NewRTPOpusCodec(webrtc.DefaultPayloadTypeOpus, 48000)
+		e.RegisterCodec(codec)
 	}
 
-	return me, nil
+	if len(e.GetCodecsByName(webrtc.VP8)) == 0 {
+		codec := webrtc.NewRTPVP8CodecExt(webrtc.DefaultPayloadTypeVP8, 90000, rtcpfb, "")
+		e.RegisterCodec(codec)
+	}
+
+	if len(e.GetCodecsByName(webrtc.VP9)) == 0 {
+		codec := webrtc.NewRTPVP9CodecExt(webrtc.DefaultPayloadTypeVP9, 90000, rtcpfb, "")
+		e.RegisterCodec(codec)
+	}
+
+	if len(e.GetCodecsByName(webrtc.H264)) == 0 {
+		codec := webrtc.NewRTPH264CodecExt(webrtc.DefaultPayloadTypeH264, 90000, rtcpfb, "")
+		e.RegisterCodec(codec)
+	}
+
+	return nil
 }

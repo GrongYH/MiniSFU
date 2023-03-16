@@ -1,11 +1,15 @@
 package sfu
 
 import (
-	"Pion-SFU/sfu/log"
+	"github.com/lucsky/cuid"
+	"github.com/pion/webrtc/v3"
+	"miniSFU/sfu/log"
 	"sync"
 	"time"
+)
 
-	"github.com/pion/webrtc/v3"
+const (
+	statCycle = 6 * time.Second
 )
 
 // Transport represents a transport that media can be sent over
@@ -13,13 +17,9 @@ type Transport interface {
 	ID() string
 	GetRouter(uint32) *Router
 	Routers() map[uint32]*Router
-	NewSender(*webrtc.TrackRemote) (Sender, error)
+	NewSender(*webrtc.Track) (Sender, error)
 	stats() string
 }
-
-const (
-	statCycle = 6 * time.Second
-)
 
 // WebRTCTransport represents a sfu peer connection
 type WebRTCTransport struct {
@@ -31,7 +31,29 @@ type WebRTCTransport struct {
 	session                    *Session
 	routers                    map[uint32]*Router
 	onNegotiationNeededHandler func()
-	onTrackHandler             func(*webrtc.TrackRemote, *webrtc.RTPReceiver)
+	onTrackHandler             func(*webrtc.Track, *webrtc.RTPReceiver)
+}
+
+func NewWebRTCTransport(session *Session, offer webrtc.SessionDescription) (*WebRTCTransport, error) {
+	me := MediaEngine{}
+	if err := me.PopulateFromSDP(offer); err != nil {
+		return nil, errSdpParseFailed
+	}
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(me.MediaEngine), webrtc.WithSettingEngine(setting))
+	pc, err := api.NewPeerConnection(cfg)
+	if err != nil {
+		log.Errorf("NewPeer error: %v", err)
+		return nil, errPeerConnectionInitFailed
+	}
+
+	p := &WebRTCTransport{
+		id:      cuid.New(),
+		pc:      pc,
+		me:      me,
+		session: session,
+		routers: make(map[uint32]*Router),
+	}
 }
 
 // CreateOffer generates the localDescription

@@ -56,6 +56,7 @@ func NewWebRTCSender(track *webrtc.Track, sender *webrtc.RTPSender) *WebRTCSende
 	}
 
 	go s.receiveRTCP(sender)
+	// add rtp to track
 	go s.sendRTP()
 
 	return s
@@ -172,7 +173,6 @@ func (s *WebRTCSender) rembLoop() {
 			rembTotalRate = 0
 			lowest = math.MaxFloat32
 		}
-
 	}
 }
 

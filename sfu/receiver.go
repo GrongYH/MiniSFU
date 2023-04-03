@@ -6,6 +6,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"io"
+	buffer2 "miniSFU/buffer"
 	"miniSFU/sfu/log"
 	"sync"
 	"time"
@@ -104,7 +105,7 @@ func (a *WebRTCAudioReceiver) stats() string {
 // WebRTCVideoReceiver receives a video track
 // videoTrack will use buffer, so that rtcp will be used
 type WebRTCVideoReceiver struct {
-	buffer         *Buffer
+	buffer         *buffer2.Buffer
 	track          *webrtc.Track
 	bandwidth      uint64
 	lostRate       float64
@@ -137,7 +138,7 @@ type WebRTCVideoReceiverConfig struct {
 
 func NewWebRTCVideoReceiver(config WebRTCVideoReceiverConfig, track *webrtc.Track) *WebRTCVideoReceiver {
 	v := &WebRTCVideoReceiver{
-		buffer: NewBuffer(uint32(track.SSRC()), uint8(track.PayloadType()), BufferOptions{
+		buffer: buffer2.NewBuffer(uint32(track.SSRC()), uint8(track.PayloadType()), buffer2.BufferOptions{
 			BufferTime: config.MaxBufferTime,
 		}),
 		track:          track,
@@ -478,5 +479,5 @@ func (v *WebRTCVideoReceiver) tccLoop() {
 
 // Stats get stats for video receiver
 func (v *WebRTCVideoReceiver) stats() string {
-	return fmt.Sprintf("payload: %d | lostRate: %.2f | bandwidth: %dkbps | %s", v.buffer.GetPayloadType(), v.lostRate, v.bandwidth, v.buffer.stats())
+	return fmt.Sprintf("payload: %d | lostRate: %.2f | bandwidth: %dkbps", v.buffer.GetPayloadType(), v.lostRate, v.bandwidth)
 }

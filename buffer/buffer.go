@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	maxSN      = 65536 //sequence number
-	maxPktSize = 1000
+	maxSN = 1 << 16 //sequence number
+	// maxPktSize = 1000
 
 	// vp8 vp9 h264 clock rate 90000Hz
 	videoClock = 90000

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 )
 

@@ -2,7 +2,7 @@ package sfu
 
 import (
 	"github.com/pion/webrtc/v3"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 	"time"
 )

@@ -4,23 +4,14 @@ import (
 	"fmt"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 )
 
 const (
-	maxSN = 1 << 16 //sequence number
-	// maxPktSize = 1000
+	maxSN = 1 << 16
 
-	// vp8 vp9 h264 clock rate 90000Hz
-	videoClock = 90000
-
-	// 1 + 1（FSN + BLP）
-	// FSN : Identifies the first sequence number lost.
-	// BLP : Bitmask of following lost packets
-	maxNackLostSize = 17
-
-	defaultBufferTime = 1000 //ms
+	reportDelta = 1e9
 )
 
 type Buffer struct {

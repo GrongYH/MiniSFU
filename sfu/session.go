@@ -2,7 +2,7 @@ package sfu
 
 import (
 	"fmt"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 )
 

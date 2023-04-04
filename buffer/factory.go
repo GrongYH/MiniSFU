@@ -1,6 +1,10 @@
 package buffer
 
-import "sync"
+import (
+	"github.com/pion/transport/packetio"
+	"io"
+	"sync"
+)
 
 // Factory 工厂类，可以生产rtp报文的ReadWriteCloser 以及 rtcp报文的ReadWriteCloser
 type Factory struct {
@@ -28,4 +32,55 @@ func NewFactory() *Factory {
 		rtpBuffers: make(map[uint32]*Buffer),
 		rtcpReader: make(map[uint32]*RTCPReader),
 	}
+}
+
+func (f *Factory) GetOrNew(packetType packetio.BufferPacketType, ssrc uint32) io.ReadWriteCloser {
+	f.Lock()
+	defer f.Unlock()
+
+	switch packetType {
+	case packetio.RTCPBufferPacket:
+		if reader, ok := f.rtcpReader[ssrc]; ok {
+			return reader
+		}
+		reader := NewRTCPReader(ssrc)
+		f.rtcpReader[ssrc] = reader
+		reader.OnClose(func() {
+			f.Lock()
+			delete(f.rtcpReader, ssrc)
+			f.Unlock()
+		})
+		return reader
+	case packetio.RTPBufferPacket:
+		if reader, ok := f.rtpBuffers[ssrc]; ok {
+			return reader
+		}
+		buffer := NewBuffer(ssrc, f.videoPool, f.audioPool)
+		f.rtpBuffers[ssrc] = buffer
+		buffer.OnClose(func() {
+			f.Lock()
+			delete(f.rtpBuffers, ssrc)
+			f.Unlock()
+		})
+		return buffer
+	}
+	return nil
+}
+
+func (f *Factory) GetBufferPair(ssrc uint32) (*RTCPReader, *Buffer) {
+	f.RLock()
+	defer f.Unlock()
+	return f.rtcpReader[ssrc], f.rtpBuffers[ssrc]
+}
+
+func (f *Factory) GetBuffer(ssrc uint32) *Buffer {
+	f.RLock()
+	defer f.Unlock()
+	return f.rtpBuffers[ssrc]
+}
+
+func (f *Factory) GetRTCPReader(ssrc uint32) *RTCPReader {
+	f.RLock()
+	defer f.Unlock()
+	return f.rtcpReader[ssrc]
 }

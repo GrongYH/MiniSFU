@@ -7,7 +7,7 @@ import (
 	"github.com/pion/webrtc/v3"
 	"io"
 	buffer2 "miniSFU/buffer"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 	"time"
 )

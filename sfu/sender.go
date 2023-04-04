@@ -7,7 +7,7 @@ import (
 	"github.com/pion/webrtc/v3"
 	"io"
 	"math"
-	"miniSFU/sfu/log"
+	"miniSFU/log"
 	"sync"
 	"time"
 )

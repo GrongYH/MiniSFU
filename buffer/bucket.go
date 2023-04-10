@@ -83,7 +83,7 @@ func (b *Bucket) set(sn uint16, pkt []byte) []byte {
 	pos := b.step - int(b.headSN-sn+1)
 	log.Debugf("sn: %d, pos:%d, maxStep:%d", sn, pos, b.maxSteps)
 	if pos < 0 {
-		// 说明buffer里面的包发生了回绕，到达最后一个位置以后，又从buffer的第0个位置开始
+		// 说明buffer里面的包到达最后一个位置以后，又从buffer的第0个位置开始
 		pos = pos + b.maxSteps
 	}
 	off := pos * maxPktSize

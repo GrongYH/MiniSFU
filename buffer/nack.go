@@ -128,6 +128,7 @@ func (n *nackQueue) pairs() ([]rtcp.NackPair, bool) {
 	if np.PacketID != 0 {
 		nps = append(nps, np)
 	}
+	// 这里是不是有问题？应该是n.nacks = n.nacks[len(n.nack)-i+1:]
 	n.nacks = n.nacks[:i]
 	return nps, askKeyFrame
 }

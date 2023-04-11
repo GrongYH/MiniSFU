@@ -1,8 +1,9 @@
 package sfu
 
 import (
-	"github.com/pion/webrtc/v3"
 	"strings"
+
+	"github.com/pion/webrtc/v3"
 )
 
 // DownTrackType 决定了track的类型

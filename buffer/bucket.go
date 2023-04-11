@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"github.com/pion/rtcp"
 	"math"
-	"miniSFU/log"
+	"mini-sfu/log"
 )
 
 // 一个rtp包的最大长度

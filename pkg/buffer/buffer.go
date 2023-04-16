@@ -3,12 +3,11 @@ package buffer
 import (
 	"encoding/binary"
 	"io"
+	"mini-sfu/pkg/log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"mini-sfu/log"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -423,6 +422,8 @@ func (b *Buffer) calc(pkt []byte, arrivalTime int64) {
 
 func (b *Buffer) buildREMBPacket() *rtcp.ReceiverEstimatedMaximumBitrate {
 	br := b.bitrate
+	log.Infof("bitrate is %d", br)
+
 	if b.stats.LostRate < 0.02 {
 		br = uint64(float64(br)*1.09) + 2000
 	}

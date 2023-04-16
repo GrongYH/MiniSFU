@@ -3,9 +3,8 @@ package buffer
 import (
 	"encoding/binary"
 	"errors"
+	"mini-sfu/pkg/log"
 	"sync/atomic"
-
-	"mini-sfu/log"
 )
 
 // 搬运pion-sfu的vp8helper
@@ -129,7 +128,7 @@ func isH264Keyframe(payload []byte) bool {
 	if len(payload) < 1 {
 		return false
 	}
-	nalu := payload[0] & 0x1F
+	nalu := payload[0] & 0x1F // 判断后5位的Type
 	if nalu == 0 {
 		// reserved
 		return false
@@ -137,6 +136,8 @@ func isH264Keyframe(payload []byte) bool {
 		// simple NALU
 		return nalu == 5
 	} else if nalu == 24 || nalu == 25 || nalu == 26 || nalu == 27 {
+		// RTP 组合封包时，打包方式为
+		// | RTP Header | STAP-A（8bit） | NALU size (16bit）| NALU | NALU size | NALU |...
 		// STAP-A, STAP-B, MTAP16 or MTAP24
 		i := 1
 		if nalu == 25 || nalu == 26 || nalu == 27 {
@@ -176,12 +177,21 @@ func isH264Keyframe(payload []byte) bool {
 		}
 		return false
 	} else if nalu == 28 || nalu == 29 {
+		// RTP 分片封包
+		// | RTP Header | FU indicator(表示是不是分片封包) |FU header（8bit，表示是不是该nalu的第一个分片或最后一个分片）| NALU |
 		// FU-A or FU-B
 		if len(payload) < 2 {
 			return false
 		}
+		// FU Header的格式
+		/*
+			0 1 2 3 4 5 6 7
+			+-+-+-+-+-+-+-+-+
+			|S|E|R|  Type   |
+			+-+-+-+-+-+-+-+-+
+		*/
 		if (payload[1] & 0x80) == 0 {
-			// not a starting fragment
+			// 不是第一个分片，只需要判断第一个分片即可
 			return false
 		}
 		return payload[1]&0x1F == 5

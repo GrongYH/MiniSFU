@@ -3,6 +3,7 @@ module mini-sfu
 go 1.19
 
 require (
+	github.com/gammazero/deque v0.2.1
 	github.com/lucsky/cuid v1.2.1
 	github.com/pion/rtcp v1.2.10
 	github.com/pion/rtp v1.7.13

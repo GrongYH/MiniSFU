@@ -3,7 +3,7 @@ package buffer
 import (
 	"encoding/binary"
 	"errors"
-	"mini-sfu/pkg/log"
+	"mini-sfu/internal/log"
 	"sync/atomic"
 )
 

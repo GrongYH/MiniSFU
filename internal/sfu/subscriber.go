@@ -1,21 +1,27 @@
 package sfu
 
 import (
+	"github.com/bep/debounce"
 	"github.com/pion/webrtc/v3"
 	"mini-sfu/internal/log"
 	"sync"
+	"time"
 )
 
 type Subscriber struct {
 	sync.RWMutex
 
-	id string
-	pc *webrtc.PeerConnection
-	me *webrtc.MediaEngine
+	id     string
+	pc     *webrtc.PeerConnection
+	me     *webrtc.MediaEngine
+	tracks map[string][]*DownTrack
+
+	negotiate func()
 
 	closeOnce sync.Once
 }
 
+// NewSubscriber 建立一个空pc
 func NewSubscriber(id string, cfg WebRTCTransportConfig) (*Subscriber, error) {
 	me := &webrtc.MediaEngine{}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithSettingEngine(cfg.setting))
@@ -53,4 +59,36 @@ func (s *Subscriber) Close() {
 		}
 		log.Debugf("webrtc ice closed for peer: %s", s.id)
 	})
+}
+
+func (s *Subscriber) OnNegotiationNeeded(f func()) {
+	debounced := debounce.New(250 * time.Millisecond)
+	s.negotiate = func() {
+		debounced(f)
+	}
+}
+
+func (s *Subscriber) CreateOffer() (webrtc.SessionDescription, error) {
+	offer, err := s.pc.CreateOffer(nil)
+	if err != nil {
+		log.Errorf("PeerId: %s, subscriber CreateOffer error: %v", err)
+		return webrtc.SessionDescription{}, nil
+	}
+	log.Debugf("PeerId: %s, Subscriber  CreateOffer success, offer: %s", offer.SDP)
+	err = s.pc.SetLocalDescription(offer)
+	if err != nil {
+		log.Errorf("PeerId: %s, subscriber SetLocalDescription error: %v", err)
+		return webrtc.SessionDescription{}, nil
+	}
+	return offer, nil
+}
+
+func (s *Subscriber) SetRemoteDescription(des webrtc.SessionDescription) error {
+	err := s.pc.SetRemoteDescription(des)
+	if err != nil {
+		log.Errorf("PeerId: %s, subscriber SetRemoteDescription error: %v", err)
+		return err
+	}
+	log.Debugf("PeerId: %s, Subscriber SetRemoteDescription success")
+	return nil
 }

@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"github.com/pion/webrtc/v3"
+	"mini-sfu/internal/buffer"
 	"sync"
 )
 
@@ -17,6 +18,10 @@ type SFU struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 }
+
+var (
+	bufferFactory *buffer.Factory
+)
 
 // NewSFU creates a new sfu instance
 func NewSFU() *SFU {

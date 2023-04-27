@@ -42,18 +42,14 @@ func NewPublisher(id string, session *Session, cfg WebRTCTransportConfig) (*Publ
 		log.Debugf("Peer %s | got remote track id: %s | mediaSSRC: %d rid :%s | streamID: %s",
 			p.id, track.ID(), track.SSRC(), track.RID(), track.StreamID())
 
-		// 这里AddReceiver会新建WebRTCReceiver，然后AddUpTrack
-		// uptrack是收流的，downtrack是发流的
+		// 每当收到一个UpTrack时，新建一个Receiver用来接收。
+		// 同时让Router管理该Receiver
 		r, pub := p.router.AddReceiver(receiver, track)
 		if pub {
-			//这里会把流发布到房间内，其他peer会订阅到
+			//这里会把UpTrack发布到房间内，其他peer会订阅到
 			p.session.Publish(p.router, r)
 		}
 	})
-
-	//pc.OnDataChannel(func(channel *webrtc.DataChannel) {
-	//
-	//})
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Debugf("PeerId: %s, Publisher ice connection state: %s", p.id, state)
@@ -86,14 +82,12 @@ func (p *Publisher) Answer(offer webrtc.SessionDescription) (webrtc.SessionDescr
 		log.Errorf("PeerId: %s, publisher setRemoteSDP error: %v", err)
 		return webrtc.SessionDescription{}, err
 	}
-	log.Debugf("PeerId: %s, publisher  setRemoteSDP success, offer: %s", offer.SDP)
 
 	answer, err := p.pc.CreateAnswer(nil)
 	if err != nil {
 		log.Errorf("PeerId: %s, publisher CreateAnswer error: %v", err)
 		return webrtc.SessionDescription{}, err
 	}
-	log.Debugf("PeerId: %s, publisher  CreateAnswer success, answer: %s", offer.SDP)
 
 	if err := p.pc.SetLocalDescription(answer); err != nil {
 		log.Errorf("PeerId: %s, publisher SetLocalDescription error: %v", err)

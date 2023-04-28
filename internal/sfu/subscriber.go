@@ -92,3 +92,22 @@ func (s *Subscriber) SetRemoteDescription(des webrtc.SessionDescription) error {
 	log.Debugf("PeerId: %s, Subscriber SetRemoteDescription success")
 	return nil
 }
+
+func (s *Subscriber) GetDownTracks(sid string) []*DownTrack {
+	s.Lock()
+	defer s.Unlock()
+	return s.tracks[sid]
+}
+
+// AddDownTrack 给subscriber中添加downtrack
+func (s *Subscriber) AddDownTrack(streamID string, track *DownTrack) {
+	s.Lock()
+	defer s.Unlock()
+
+	if dt, ok := s.tracks[streamID]; ok {
+		dt = append(dt, track)
+		s.tracks[streamID] = dt
+	} else {
+		s.tracks[streamID] = []*DownTrack{track}
+	}
+}

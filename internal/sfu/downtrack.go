@@ -29,6 +29,7 @@ type DownTrack struct {
 	mine        string
 	ssrc        uint32
 	streamID    string
+	rid         string
 	payloadType uint8
 
 	//sequencer *sequencer
@@ -51,11 +52,11 @@ type DownTrack struct {
 	//maxSpatialLayer  int64
 	//maxTemporalLayer int64
 
-	codec       webrtc.RTPCodecCapability
-	transceiver *webrtc.RTPTransceiver
-	receiver    Receiver
-	writeStream webrtc.TrackLocalWriter
-	//onCloseHandler func()
+	codec          webrtc.RTPCodecCapability
+	transceiver    *webrtc.RTPTransceiver
+	receiver       Receiver
+	writeStream    webrtc.TrackLocalWriter
+	onCloseHandler func()
 	//onBind         func()
 	//closeOnce      sync.Once
 
@@ -69,11 +70,12 @@ type DownTrack struct {
 // NewDownTrack 需要实现 TrackLocal的方法，包括Bind，Unbind，ID，RID，StreamID， Kind
 func NewDownTrack(c webrtc.RTPCodecCapability, r Receiver, peerID string) (*DownTrack, error) {
 	return &DownTrack{
-		// id:       r.TrackID(),
-		peerID: peerID,
-		// streamID: r.StreamID(),
+		id:       r.TrackID(),
+		peerID:   peerID,
+		streamID: r.StreamID(),
 		receiver: r,
 		codec:    c,
+		rid:      r.RID(),
 	}, nil
 }
 
@@ -125,6 +127,10 @@ func (d *DownTrack) ID() string {
 	return d.id
 }
 
+func (d *DownTrack) RID() string {
+	return d.rid
+}
+
 // Codec 返回当前Track的编解码能力
 func (d *DownTrack) Codec() webrtc.RTPCodecCapability {
 	return d.codec
@@ -145,4 +151,8 @@ func (d *DownTrack) Kind() webrtc.RTPCodecType {
 	default:
 		return webrtc.RTPCodecType(0)
 	}
+}
+
+func (d *DownTrack) OnCloseHandler(f func()) {
+	d.onCloseHandler = f
 }

@@ -97,7 +97,6 @@ type Stats struct {
 
 // Options buffer 配置选项
 type Options struct {
-	BufferTime int
 	MaxBitRate uint64
 }
 

@@ -17,7 +17,7 @@ type RouterConfig struct {
 type Router interface {
 	ID() string
 	AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRemote) (Receiver, bool)
-	PubDownTracks(s *Subscriber, r Receiver) error
+	AddDownTracks(s *Subscriber, r Receiver) error
 	Stop()
 }
 
@@ -32,6 +32,7 @@ type router struct {
 	pc *webrtc.PeerConnection
 
 	rtcpCh    chan []rtcp.Packet
+	stopCh    chan struct{}
 	twcc      *buffer.Responder
 	receivers map[string]Receiver
 }
@@ -45,7 +46,9 @@ func newRouter(tid string, pc *webrtc.PeerConnection, session *Session, config R
 		config:    config,
 		receivers: make(map[string]Receiver),
 		rtcpCh:    make(chan []rtcp.Packet, 10),
+		stopCh:    make(chan struct{}),
 	}
+	go r.sendRTCP()
 	return r
 }
 
@@ -59,7 +62,6 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 
 	publish := false
 	trackID := track.ID()
-	rid := track.RID()
 
 	//这里获取了之前init函数中，new出来的buffer和rtcpReader
 	//需要注意的是，开启大小流后，三层的streamId、trackId是一样的，但是rid和ssrc是不同的，rid一般是f、h、q
@@ -104,7 +106,7 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 
 	recv, ok := r.receivers[trackID]
 	if !ok {
-		recv = NewWebRTCReceiver(receiver, track)
+		recv = NewWebRTCReceiver(receiver, track, r.id)
 		r.receivers[trackID] = recv
 		// 所有receiver的rtcp报文统一写入到router的rtcpCh，由router发送给publisher
 		recv.SetRTCPCh(r.rtcpCh)
@@ -119,12 +121,19 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 		MaxBitRate: r.config.MaxBandwidth,
 	})
 
+	// 添加上行Track
 	recv.AddUpTrack(track, buff)
 	return recv, publish
 }
 
-// PubDownTracks 新peer加入时，发布track到其他subscriber
-func (r *router) PubDownTracks(s *Subscriber, recv Receiver) error {
+func (r *router) DeleteReceiver(track string) {
+	r.Lock()
+	defer r.Unlock()
+	delete(r.receivers, track)
+}
+
+// AddDownTracks 给Subscriber和receiver中添加DownTrack
+func (r *router) AddDownTracks(s *Subscriber, recv Receiver) error {
 	if recv != nil {
 		if err := r.addDownTrack(s, recv); err != nil {
 			log.Errorf("Peer %s pub track to peer %s error: %v", r.id, s.id, err)
@@ -133,7 +142,6 @@ func (r *router) PubDownTracks(s *Subscriber, recv Receiver) error {
 		s.negotiate()
 
 	} else if len(r.receivers) > 0 {
-		//新peer加入时，订阅其他Peer的所有receiver
 		for _, rev := range r.receivers {
 			if err := r.addDownTrack(s, rev); err != nil {
 				log.Errorf("Peer %s sub track from peer %s error: %v", r.id, s.id, err)
@@ -146,8 +154,7 @@ func (r *router) PubDownTracks(s *Subscriber, recv Receiver) error {
 }
 
 func (r *router) Stop() {
-	// TODO: implement me
-	panic(nil)
+	r.stopCh <- struct{}{}
 }
 
 func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
@@ -177,27 +184,56 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 		return err
 	}
 
-	//把downTrack增加到pc中,方向为sendonly
+	//把downTrack增加到pc中
 	if downTrack.transceiver, err = sub.pc.AddTransceiverFromTrack(downTrack, webrtc.RTPTransceiverInit{
+		// 方向为sendonly
 		Direction: webrtc.RTPTransceiverDirectionSendonly,
 	}); err != nil {
 		log.Errorf("peer %s add downTrack to pc error: %v", r.id, err)
 		return err
 	}
 
-	//删除downtrack回调
+	//删除downTrack回调
 	downTrack.OnCloseHandler(func() {
 		if sub.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
-			if err := sub.pc.RemoveTrack(downTrack.transceiver.Sender()); err != nil {
+			// 从pc中删除
+			err := sub.pc.RemoveTrack(downTrack.transceiver.Sender())
+			if err != nil {
 				if err == webrtc.ErrConnectionClosed {
 					return
 				}
 				log.Errorf("Error closing down track: %v", err)
-			} else {
-				sub.RemoveDownTrack(recv.StreamID(), downTrack)
-				// 从subscriber删除downtrack时，需要进行重协商
-				sub.negotiate()
 			}
+			// 从subscriber删除
+			sub.RemoveDownTrack(recv.StreamID(), downTrack)
+			// 从subscriber删除downtrack时，需要进行重协商
+			sub.negotiate()
 		}
 	})
+
+	// 协商成功后，开始发送源描述报文
+	downTrack.OnBind(func() {
+		go sub.sendStreamDownTracksReports(recv.StreamID())
+	})
+
+	// 增加downTrack到sub中，sub只是用来管理downTrack和生成SenderReport等
+	sub.AddDownTrack(recv.StreamID(), downTrack)
+	// 增加downTrack到WebRTCReceiver中，实际收发包是WebRTCReceiver来控制，在writeRTP中
+	recv.AddDownTrack(downTrack, r.config.Simulcast.BestQualityFirst)
+	return nil
+}
+
+// sendRTCP 发送RTCP报文(整合所有receiver收到的, 以及buffer中构造的twcc报文和nack，pli报文)
+func (r *router) sendRTCP() {
+	for {
+		select {
+		case pkt := <-r.rtcpCh:
+			if err := r.pc.WriteRTCP(pkt); err != nil {
+				log.Errorf("Write rtcp to peer %s err :%v", r.id, err)
+			}
+		case <-r.stopCh:
+			log.Infof("Stop to send rtcp to peer %s", r.id)
+			return
+		}
+	}
 }

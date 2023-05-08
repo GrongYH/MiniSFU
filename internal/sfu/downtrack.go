@@ -1,6 +1,9 @@
 package sfu
 
 import (
+	"github.com/pion/rtcp"
+	"github.com/pion/transport/packetio"
+	"mini-sfu/internal/buffer"
 	"strings"
 
 	"github.com/pion/webrtc/v3"
@@ -33,15 +36,15 @@ type DownTrack struct {
 	payloadType uint8
 
 	//sequencer *sequencer
-	//trackType DownTrackType
+	trackType DownTrackType
 	//skipFB    int64
 	//payload   []byte
 
 	//spatialLayer  int32
 	//temporalLayer int32
 
-	//enabled  atomicBool
-	//reSync   atomicBool
+	enabled atomicBool
+	reSync  atomicBool
 	//snOffset uint16
 	//tsOffset uint32
 	//lastSSRC uint32
@@ -57,7 +60,7 @@ type DownTrack struct {
 	receiver       Receiver
 	writeStream    webrtc.TrackLocalWriter
 	onCloseHandler func()
-	//onBind         func()
+	onBind         func()
 	//closeOnce      sync.Once
 
 	//// Report helpers
@@ -75,7 +78,6 @@ func NewDownTrack(c webrtc.RTPCodecCapability, r Receiver, peerID string) (*Down
 		streamID: r.StreamID(),
 		receiver: r,
 		codec:    c,
-		rid:      r.RID(),
 	}, nil
 }
 
@@ -95,20 +97,20 @@ func (d *DownTrack) Bind(t webrtc.TrackLocalContext) (webrtc.RTPCodecParameters,
 		// 真正的发包要用到 writeStream.WriteRTP(&pkt.Header, pkt.Payload)，所以在这里保存一下writeStream
 		d.writeStream = t.WriteStream()
 
-		//d.reSync.set(true)
-		//d.enabled.set(true)
-		//// 注册rtcp包的处理函数
-		//if rr := bufferFactory.GetOrNew(packetio.RTCPBufferPacket, uint32(t.SSRC())).(*buffer.RTCPReader); rr != nil {
-		//	rr.OnPacket(func(pkt []byte) {
-		//		d.handleRTCP(pkt)
-		//	})
-		//}
+		d.reSync.set(true)
+		d.enabled.set(true)
+		// 注册rtcp包的处理函数
+		if rr := bufferFactory.GetOrNew(packetio.RTCPBufferPacket, uint32(t.SSRC())).(*buffer.RTCPReader); rr != nil {
+			rr.OnPacket(func(pkt []byte) {
+				d.handleRTCP(pkt)
+			})
+		}
 
 		if strings.HasPrefix(d.codec.MimeType, "video/") {
 			// d.sequencer = newSequencer()
 		}
 		// onBind的功能是在协商成功时，给对端发送源描述rtcp报文的。(真正的逻辑在router中)
-		//d.onBind()
+		d.onBind()
 		d.bound.set(true)
 		return codec, nil
 	}
@@ -155,4 +157,50 @@ func (d *DownTrack) Kind() webrtc.RTPCodecType {
 
 func (d *DownTrack) OnCloseHandler(f func()) {
 	d.onCloseHandler = f
+}
+
+func (d *DownTrack) OnBind(f func()) {
+	d.onBind = f
+}
+
+func (d *DownTrack) Close() {
+}
+
+func (d *DownTrack) CreateSourceDescriptionChunks() []rtcp.SourceDescriptionChunk {
+	if !d.bound.get() {
+		return nil
+	}
+	return []rtcp.SourceDescriptionChunk{
+		{
+			Source: d.ssrc,
+			Items: []rtcp.SourceDescriptionItem{{
+				Type: rtcp.SDESCNAME,
+				Text: d.streamID,
+			}},
+		}, {
+			Source: d.ssrc,
+			Items: []rtcp.SourceDescriptionItem{{
+				Type: rtcp.SDESType(15),
+				Text: d.transceiver.Mid(),
+			}},
+		},
+	}
+}
+
+// WriteRTP 发包，分为简单模式和大小流模式
+func (d *DownTrack) WriteRTP(p buffer.ExtPacket) error {
+	if !d.enabled.get() || !d.bound.get() {
+		return nil
+	}
+	switch d.trackType {
+	case SimpleDownTrack:
+		return d.writeSimpleRTP(p)
+	case SimulcastDownTrack:
+		return d.writeSimulcastRTP(p)
+	}
+	return nil
+}
+
+func (d *DownTrack) handleRTCP(p []byte) {
+
 }

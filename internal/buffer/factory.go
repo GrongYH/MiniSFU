@@ -15,7 +15,7 @@ type Factory struct {
 	rtcpReader map[uint32]*RTCPReader
 }
 
-func NewFactory() *Factory {
+func NewBufferFactory() *Factory {
 	return &Factory{
 		videoPool: &sync.Pool{
 			New: func() interface{} {

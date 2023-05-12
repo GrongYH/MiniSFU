@@ -157,13 +157,6 @@ func (b *Buffer) Bind(params webrtc.RTPParameters, o Options) {
 				b.nack = true
 			}
 		}
-	} else if b.codecType == webrtc.RTPCodecTypeAudio {
-		for _, h := range params.HeaderExtensions {
-			if h.URI == sdp.AudioLevelURI {
-				b.audioLevel = true
-				b.audioExt = uint8(h.ID)
-			}
-		}
 	}
 
 	// bucket回调
@@ -528,8 +521,8 @@ func (b *Buffer) GetPacket(buff []byte, sn uint16) (int, error) {
 	return b.bucket.getPacket(buff, sn)
 }
 
-func (b *Buffer) MaxTemporalLayer() int64 {
-	return atomic.LoadInt64(&b.maxTemporalLayer)
+func (b *Buffer) Bitrate() uint64 {
+	return atomic.LoadUint64(&b.bitrate)
 }
 
 func (b *Buffer) OnTransportWideCC(fn func(sn uint16, timeNS int64, marker bool)) {

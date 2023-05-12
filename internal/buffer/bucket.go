@@ -79,7 +79,7 @@ func (b *Bucket) set(sn uint16, pkt []byte) []byte {
 	}
 	log.Debugf("b.step: %d, b.headSN: %d", b.step, b.headSN)
 
-	// pos是从0开始算的,类似于数组
+	// pos是从0开始算的,类似于数组的下标
 	pos := b.step - int(b.headSN-sn+1)
 	log.Debugf("sn: %d, pos:%d, maxStep:%d", sn, pos, b.maxSteps)
 	if pos < 0 {

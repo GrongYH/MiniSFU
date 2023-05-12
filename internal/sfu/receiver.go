@@ -14,10 +14,16 @@ type Receiver interface {
 	StreamID() string
 	Codec() webrtc.RTPCodecParameters
 	Kind() webrtc.RTPCodecType
-	SetRTCPCh(rtcp chan []rtcp.Packet)
-	OnCloseHandler(f func())
+	SSRC(layer int) uint32
 	AddUpTrack(track *webrtc.TrackRemote, buff *buffer.Buffer)
 	AddDownTrack(track *DownTrack, bestQualityFirst bool)
+	DeleteDownTrack(layer int, id string)
+	SubDownTrack(track *DownTrack, layer int) error
+	RetransmitPackets(track *DownTrack, packets []packetMeta) error
+	GetBitrate() [3]uint64
+	OnCloseHandler(f func())
+	SendRTCP(p []rtcp.Packet)
+	SetRTCPCh(rtcp chan []rtcp.Packet)
 }
 
 type WebRTCReceiver struct {
@@ -72,6 +78,13 @@ func (w *WebRTCReceiver) Kind() webrtc.RTPCodecType {
 	return w.kind
 }
 
+func (w *WebRTCReceiver) SSRC(layer int) uint32 {
+	if track := w.upTracks[layer]; track != nil {
+		return uint32(track.SSRC())
+	}
+	return 0
+}
+
 func (w *WebRTCReceiver) SetRTCPCh(rtcp chan []rtcp.Packet) {
 	w.rtcpCh = rtcp
 }
@@ -97,10 +110,82 @@ func (w *WebRTCReceiver) AddUpTrack(track *webrtc.TrackRemote, buff *buffer.Buff
 	go w.writeRTP(layer)
 }
 
+// AddDownTrack 将downTrack添加到指定层
 func (w *WebRTCReceiver) AddDownTrack(track *DownTrack, bestQualityFirst bool) {
+	layer := 0
+	// 如果是simulcast，优先订阅质量最好的层
+	if w.isSimulcast {
+		for i, t := range w.upTracks {
+			// 有可能此时这一层的upTrack还没来，所以暂时还是nil
+			if t != nil {
+				layer = i
+				if !bestQualityFirst {
+					// 如果不是质量优先，那随便挂载到哪一层均可
+					break
+				}
+				// 否则挂载到当前已经到来的upTrack里面最好的一层
+			}
+		}
+		track.SetInitialLayers(int64(layer))
+		track.maxSpatialLayer = 2
+		track.trackType = SimulcastDownTrack
+		track.payload = packetFactory.Get().([]byte)
+	} else {
+		track.SetInitialLayers(0)
+		track.trackType = SimpleDownTrack
+	}
+	// 将downTrack添加到指定层
+	w.locks[layer].Lock()
+	w.downTracks[layer] = append(w.downTracks[layer], track)
+	w.locks[layer].Unlock()
+}
+
+func (w *WebRTCReceiver) GetBitrate() [3]uint64 {
+	var br [3]uint64
+	for i, buff := range w.buffers {
+		if buff != nil {
+			br[i] = buff.Bitrate()
+		}
+	}
+	return br
 }
 
 func (w *WebRTCReceiver) OnCloseHandler(f func()) {
+	w.onCloseHandler = f
+}
+
+// DeleteDownTrack 将sub id为id的downTrack从receiver的layer层删除
+func (w *WebRTCReceiver) DeleteDownTrack(layer int, id string) {
+	w.locks[layer].Lock()
+	defer w.locks[layer].Unlock()
+
+	idx := -1
+	for i, dt := range w.downTracks[layer] {
+		if dt.peerID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return
+	}
+
+	w.downTracks[layer][idx] = w.downTracks[layer][len(w.downTracks[layer])-1]
+	w.downTracks[layer][len(w.downTracks[layer])-1] = nil
+	w.downTracks[layer] = w.downTracks[layer][:len(w.downTracks[layer])-1]
+}
+
+// SubDownTrack 把downTrack挂载到layer层
+func (w *WebRTCReceiver) SubDownTrack(track *DownTrack, layer int) error {
+	w.locks[layer].Lock()
+	defer w.locks[layer].Unlock()
+
+	if dts := w.downTracks[layer]; dts != nil {
+		w.downTracks[layer] = append(dts, track)
+	} else {
+		return errNoReceiverFound
+	}
+	return nil
 }
 
 // writeRTP 每添加一个UpTrack，就开始启动发包流程
@@ -134,6 +219,11 @@ func (w *WebRTCReceiver) writeRTP(layer int) {
 
 		w.locks[layer].Unlock()
 	}
+}
+
+// RetransmitPackets
+func (w *WebRTCReceiver) RetransmitPackets(track *DownTrack, packets []packetMeta) error {
+
 }
 
 // closeTracks 关闭Receiver中所有Track

@@ -1,5 +1,7 @@
 package sfu
 
+import "time"
+
 const (
 	quarterResolution = "q"
 	halfResolution    = "h"
@@ -9,4 +11,9 @@ const (
 type SimulcastConfig struct {
 	BestQualityFirst    bool `json:"bestQualityFirst"`
 	EnableTemporalLayer bool `json:"enableTemporalLayer"`
+}
+
+type simulcastTrackHelpers struct {
+	switchDelay time.Time
+	lastTSCalc  int64
 }

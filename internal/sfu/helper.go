@@ -6,6 +6,10 @@ import (
 	"sync/atomic"
 )
 
+const (
+	ntpEpoch = 2208988800
+)
+
 type atomicBool int32
 
 func (a *atomicBool) set(value bool) {
@@ -39,4 +43,10 @@ func codecParametersFuzzySearch(needle webrtc.RTPCodecParameters, haystack []web
 	}
 	// 没有匹配到，codec not found
 	return webrtc.RTPCodecParameters{}, webrtc.ErrCodecNotFound
+}
+
+func timeToNtp(ns int64) uint64 {
+	seconds := uint64(ns/1e9 + ntpEpoch)
+	fraction := uint64(((ns % 1e9) << 32) / 1e9)
+	return seconds<<32 | fraction
 }

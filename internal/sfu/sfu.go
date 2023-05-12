@@ -21,7 +21,17 @@ type SFU struct {
 
 var (
 	bufferFactory *buffer.Factory
+	packetFactory *sync.Pool
 )
+
+func init() {
+	bufferFactory = buffer.NewBufferFactory()
+	packetFactory = &sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 1460)
+		},
+	}
+}
 
 // NewSFU creates a new sfu instance
 func NewSFU() *SFU {

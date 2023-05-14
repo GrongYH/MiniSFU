@@ -9,8 +9,7 @@ const (
 )
 
 type SimulcastConfig struct {
-	BestQualityFirst    bool `json:"bestQualityFirst"`
-	EnableTemporalLayer bool `json:"enableTemporalLayer"`
+	BestQualityFirst bool `json:"bestQualityFirst"`
 }
 
 type simulcastTrackHelpers struct {

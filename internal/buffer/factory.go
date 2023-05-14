@@ -1,9 +1,10 @@
 package buffer
 
 import (
-	"github.com/pion/transport/packetio"
 	"io"
 	"sync"
+
+	"github.com/pion/transport/v2/packetio"
 )
 
 // Factory 工厂类，可以生产rtp报文的ReadWriteCloser 以及 rtcp报文的ReadWriteCloser
@@ -69,18 +70,18 @@ func (f *Factory) GetOrNew(packetType packetio.BufferPacketType, ssrc uint32) io
 
 func (f *Factory) GetBufferPair(ssrc uint32) (*RTCPReader, *Buffer) {
 	f.RLock()
-	defer f.Unlock()
+	defer f.RUnlock()
 	return f.rtcpReader[ssrc], f.rtpBuffers[ssrc]
 }
 
 func (f *Factory) GetBuffer(ssrc uint32) *Buffer {
 	f.RLock()
-	defer f.Unlock()
+	defer f.RUnlock()
 	return f.rtpBuffers[ssrc]
 }
 
 func (f *Factory) GetRTCPReader(ssrc uint32) *RTCPReader {
 	f.RLock()
-	defer f.Unlock()
+	defer f.RUnlock()
 	return f.rtcpReader[ssrc]
 }

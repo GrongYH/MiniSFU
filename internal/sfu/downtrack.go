@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"github.com/pion/rtcp"
-	"github.com/pion/transport/packetio"
 	"mini-sfu/internal/buffer"
 	"mini-sfu/internal/log"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/transport/v2/packetio"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -459,6 +459,7 @@ func (d *DownTrack) handlerLayerChange(maxRatePacketLoss uint8, expectedMinBitra
 			}
 
 			if maxRatePacketLoss >= 25 {
+				// 如果下行带宽时上行带宽的5/8，且当前层不是质量最差的
 				if expectedMinBitrate <= 5*cbr/8 && currentLayer > 0 && brs[currentLayer-1] != 0 {
 					d.SwitchSpatialLayer(currentLayer - 1)
 				}
@@ -468,6 +469,8 @@ func (d *DownTrack) handlerLayerChange(maxRatePacketLoss uint8, expectedMinBitra
 		}
 	}
 }
+
+// SwitchSpatialLayer 负责将downTrack添加到目标层，删除当前层的downTrack是在writeSimulcastRTP中进行的
 func (d *DownTrack) SwitchSpatialLayer(targetLayer int64) {
 	if d.trackType == SimulcastDownTrack {
 		layer := atomic.LoadInt32(&d.spatialLayer)

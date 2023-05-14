@@ -93,6 +93,7 @@ func (n *sequencer) push(sn, offSn uint16, timeStamp uint32, layer uint8, head b
 	return pm
 }
 
+// getSeqNoPairs seqNo中装载的sn为偏移后的sn
 func (n *sequencer) getSeqNoPairs(seqNo []uint16) []packetMeta {
 	n.Lock()
 

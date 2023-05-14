@@ -24,7 +24,7 @@ func NewSession(id string) *Session {
 
 func (s *Session) Peers() []*Peer {
 	s.mu.RLock()
-	defer s.mu.Unlock()
+	defer s.mu.RUnlock()
 	peers := make([]*Peer, 0, len(s.peers))
 	for _, p := range s.peers {
 		peers = append(peers, p)
@@ -34,7 +34,7 @@ func (s *Session) Peers() []*Peer {
 
 func (s *Session) AddPeer(peer *Peer) {
 	s.mu.RLock()
-	defer s.mu.Unlock()
+	defer s.mu.RUnlock()
 	s.peers[peer.id] = peer
 }
 
@@ -42,7 +42,7 @@ func (s *Session) RemovePeer(pid string) {
 	s.mu.RLock()
 	delete(s.peers, pid)
 	log.Infof("RemovePeer %s from session %s", pid, s.id)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	// 当Peer数为0时，关闭session
 	if len(s.peers) == 0 && s.onCloseHandler != nil && !s.closed.get() {
@@ -74,6 +74,7 @@ func (s *Session) Publish(router Router, r Receiver) {
 func (s *Session) Subscribe(peer *Peer) {
 	peers := s.Peers()
 	for _, p := range peers {
+		// 不订阅自身
 		if p == peer {
 			continue
 		}

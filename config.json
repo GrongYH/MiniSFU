@@ -1,0 +1,12 @@
+{
+  "iceLite": true,
+  "portRange": [5000, 5200],
+  "sdpSemantics": "unified-plan",
+  "router": {
+    "maxBufferTime": 1000,
+    "maxBandwidth": 1500,
+    "simulcast": {
+      "bestQualityFirst": true
+    }
+  }
+}

@@ -1,10 +1,13 @@
 package sfu
 
 import (
+	"github.com/gammazero/workerpool"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"io"
 	"mini-sfu/internal/buffer"
+	"mini-sfu/internal/log"
 	"sync"
 	"time"
 )
@@ -30,21 +33,21 @@ type WebRTCReceiver struct {
 	rtcpMu    sync.Mutex
 	closeOnce sync.Once
 
-	peerID     string
-	trackID    string
-	streamID   string
-	kind       webrtc.RTPCodecType
-	bandwidth  uint64
-	lastPli    int64
-	stream     string
-	receiver   *webrtc.RTPReceiver
-	codec      webrtc.RTPCodecParameters
-	rtcpCh     chan []rtcp.Packet
-	locks      [3]sync.Mutex
-	buffers    [3]*buffer.Buffer
-	upTracks   [3]*webrtc.TrackRemote
-	downTracks [3][]*DownTrack
-
+	peerID         string
+	trackID        string
+	streamID       string
+	kind           webrtc.RTPCodecType
+	bandwidth      uint64
+	lastPli        int64
+	stream         string
+	receiver       *webrtc.RTPReceiver
+	codec          webrtc.RTPCodecParameters
+	rtcpCh         chan []rtcp.Packet
+	locks          [3]sync.Mutex
+	buffers        [3]*buffer.Buffer
+	upTracks       [3]*webrtc.TrackRemote
+	downTracks     [3][]*DownTrack
+	nackWorker     *workerpool.WorkerPool
 	isSimulcast    bool
 	onCloseHandler func()
 }
@@ -58,6 +61,7 @@ func NewWebRTCReceiver(recv *webrtc.RTPReceiver, track *webrtc.TrackRemote, pid 
 		streamID:    track.StreamID(),
 		codec:       track.Codec(),
 		kind:        track.Kind(),
+		nackWorker:  workerpool.New(1),
 		isSimulcast: len(track.RID()) > 0,
 	}
 }
@@ -140,6 +144,7 @@ func (w *WebRTCReceiver) AddDownTrack(track *DownTrack, bestQualityFirst bool) {
 	w.locks[layer].Unlock()
 }
 
+// GetBitrate 获取上行码率
 func (w *WebRTCReceiver) GetBitrate() [3]uint64 {
 	var br [3]uint64
 	for i, buff := range w.buffers {
@@ -221,9 +226,43 @@ func (w *WebRTCReceiver) writeRTP(layer int) {
 	}
 }
 
-// RetransmitPackets
+// RetransmitPackets 根据偏移后的SN从sequencer里面找到发送包号，并根据发送包号从buffer中取出缓存的packet
 func (w *WebRTCReceiver) RetransmitPackets(track *DownTrack, packets []packetMeta) error {
+	if w.nackWorker.Stopped() {
+		return io.ErrClosedPipe
+	}
 
+	w.nackWorker.Submit(func() {
+		for _, meta := range packets {
+			pktBuff := packetFactory.Get().([]byte)
+			buff := w.buffers[meta.layer]
+			if buff == nil {
+				break
+			}
+			// 从buffer中获取缓存的packet
+			pktLen, err := buff.GetPacket(pktBuff, meta.sourceSeqNo)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				continue
+			}
+			var pkt rtp.Packet
+			if err = pkt.Unmarshal(pktBuff[:pktLen]); err != nil {
+				continue
+			}
+
+			// 将packet的元数据修改
+			pkt.Header.SequenceNumber = meta.targetSeqNo
+			pkt.Header.Timestamp = meta.timestamp
+
+			if _, err = track.writeStream.WriteRTP(&pkt.Header, pkt.Payload); err != nil {
+				log.Errorf("Writing rtx packet err: %v", err)
+			}
+			packetFactory.Put(pktBuff)
+		}
+	})
+	return nil
 }
 
 // closeTracks 关闭Receiver中所有Track
@@ -238,6 +277,7 @@ func (w *WebRTCReceiver) closeTracks() {
 		w.downTracks[i] = w.downTracks[i][:0]
 		w.locks[i].Unlock()
 	}
+	w.nackWorker.Stop()
 	if w.onCloseHandler != nil {
 		w.onCloseHandler()
 	}

@@ -33,9 +33,10 @@ func NewSubscriber(id string, cfg WebRTCTransportConfig) (*Subscriber, error) {
 	}
 
 	s := &Subscriber{
-		id: id,
-		pc: pc,
-		me: me,
+		id:     id,
+		pc:     pc,
+		me:     me,
+		tracks: make(map[string][]*DownTrack),
 	}
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -72,7 +73,7 @@ func (s *Subscriber) OnNegotiationNeeded(f func()) {
 func (s *Subscriber) CreateOffer() (webrtc.SessionDescription, error) {
 	offer, err := s.pc.CreateOffer(nil)
 	if err != nil {
-		log.Errorf("PeerId: %s, subscriber CreateOffer error: %v", err)
+		log.Errorf("PeerId: %s, subscriber CreateOffer error: %v", s.id, err)
 		return webrtc.SessionDescription{}, nil
 	}
 	log.Debugf("PeerId: %s, Subscriber  CreateOffer success, offer: %s", offer.SDP)

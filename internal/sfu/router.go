@@ -157,6 +157,7 @@ func (r *router) Stop() {
 	r.stopCh <- struct{}{}
 }
 
+// addDownTrack 将downTrack添加到sub，并挂载到recv中
 func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 	// 避免重复添加downTrack
 	for _, dt := range sub.GetDownTracks(recv.StreamID()) {

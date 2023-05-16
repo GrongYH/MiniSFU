@@ -62,6 +62,7 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 
 	publish := false
 	trackID := track.ID()
+	rid := track.RID()
 
 	//这里获取了之前init函数中，new出来的buffer和rtcpReader
 	//需要注意的是，开启大小流后，三层的streamId、trackId是一样的，但是rid和ssrc是不同的，rid一般是f、h、q
@@ -115,14 +116,22 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 			delete(r.receivers, trackID)
 			r.Unlock()
 		})
+		if len(rid) == 0 || r.config.Simulcast.BestQualityFirst && rid == fullResolution ||
+			!r.config.Simulcast.BestQualityFirst && rid == quarterResolution {
+			publish = true
+		}
+	} else if r.config.Simulcast.BestQualityFirst && rid == fullResolution ||
+		!r.config.Simulcast.BestQualityFirst && rid == quarterResolution ||
+		!r.config.Simulcast.BestQualityFirst && rid == halfResolution {
+		publish = true
 	}
-	publish = true
+
+	// 添加上行Track
+	recv.AddUpTrack(track, buff)
 	buff.Bind(receiver.GetParameters(), buffer.Options{
 		MaxBitRate: r.config.MaxBandwidth,
 	})
 
-	// 添加上行Track
-	recv.AddUpTrack(track, buff)
 	return recv, publish
 }
 
@@ -134,6 +143,9 @@ func (r *router) DeleteReceiver(track string) {
 
 // AddDownTracks 给Subscriber和receiver中添加DownTrack
 func (r *router) AddDownTracks(s *Subscriber, recv Receiver) error {
+	r.Lock()
+	defer r.Unlock()
+
 	if recv != nil {
 		if err := r.addDownTrack(s, recv); err != nil {
 			log.Errorf("Peer %s pub track to peer %s error: %v", r.id, s.id, err)
@@ -141,9 +153,11 @@ func (r *router) AddDownTracks(s *Subscriber, recv Receiver) error {
 		}
 		s.negotiate()
 
-	} else if len(r.receivers) > 0 {
-		for _, rev := range r.receivers {
-			if err := r.addDownTrack(s, rev); err != nil {
+	}
+
+	if len(r.receivers) > 0 {
+		for _, rcv := range r.receivers {
+			if err := r.addDownTrack(s, rcv); err != nil {
 				log.Errorf("Peer %s sub track from peer %s error: %v", r.id, s.id, err)
 				return err
 			}
@@ -165,14 +179,17 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 			return nil
 		}
 	}
+
 	codec := recv.Codec()
-	if err := sub.me.RegisterCodec(codec, recv.Kind()); err != nil {
-		log.Errorf("peer %s subscriber register codec failed, error: %v", sub.id, err)
-		return err
-	}
+	//if err := sub.me.RegisterCodec(codec, recv.Kind()); err != nil {
+	//	log.Errorf("peer %s subscriber register codec failed, error: %v", sub.id, err)
+	//	return err
+	//}
+	//sub.me.RegisterDefaultCodecs()
+	//log.Debugf("sub.me %v", sub.me)
 
 	// 创建downTrack，用于给客户端下发流，downTrack标识了被谁订阅
-	// 因此一个receiver中同一层的不同downTrack,内容基本上一样，不一样的是sub.id
+	// 因此一个receiver中同一层的不同downTrack编解码参数是一样的，不一样的是sub.id
 	downTrack, err := NewDownTrack(webrtc.RTPCodecCapability{
 		MimeType:     codec.MimeType,
 		ClockRate:    codec.ClockRate,
@@ -184,7 +201,6 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 		log.Errorf("peer %s create downTrack failed, error: %v", r.id, err)
 		return err
 	}
-
 	//把downTrack增加到pc中
 	if downTrack.transceiver, err = sub.pc.AddTransceiverFromTrack(downTrack, webrtc.RTPTransceiverInit{
 		// 方向为sendonly
@@ -204,11 +220,12 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 					return
 				}
 				log.Errorf("Error closing down track: %v", err)
+			} else {
+				// 从subscriber删除
+				sub.RemoveDownTrack(recv.StreamID(), downTrack)
+				// 从subscriber删除downtrack时，需要进行重协商
+				sub.negotiate()
 			}
-			// 从subscriber删除
-			sub.RemoveDownTrack(recv.StreamID(), downTrack)
-			// 从subscriber删除downtrack时，需要进行重协商
-			sub.negotiate()
 		}
 	})
 
@@ -221,6 +238,7 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 	sub.AddDownTrack(recv.StreamID(), downTrack)
 	// 增加downTrack到WebRTCReceiver中，实际收发包是WebRTCReceiver来控制，在writeRTP中
 	recv.AddDownTrack(downTrack, r.config.Simulcast.BestQualityFirst)
+	log.Debugf("add downTrack to subscriber and receiver")
 	return nil
 }
 

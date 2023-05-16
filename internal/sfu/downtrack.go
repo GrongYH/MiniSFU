@@ -134,7 +134,7 @@ func (d *DownTrack) ID() string {
 }
 
 func (d *DownTrack) RID() string {
-	return d.rid
+	return ""
 }
 
 // Codec 返回当前Track的编解码能力
@@ -239,6 +239,10 @@ func (d *DownTrack) WriteRTP(p buffer.ExtPacket) error {
 		return d.writeSimulcastRTP(p)
 	}
 	return nil
+}
+
+func (d *DownTrack) SetTransceiver(transceiver *webrtc.RTPTransceiver) {
+	d.transceiver = transceiver
 }
 
 func (d *DownTrack) writeSimpleRTP(extPkt buffer.ExtPacket) error {

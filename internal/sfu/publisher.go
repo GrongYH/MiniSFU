@@ -4,20 +4,22 @@ import (
 	"github.com/pion/webrtc/v3"
 	"mini-sfu/internal/log"
 	"sync"
+	"sync/atomic"
 )
 
 type Publisher struct {
 	id string
 	pc *webrtc.PeerConnection
 
-	router  Router
-	session *Session
+	router                            Router
+	session                           *Session
+	onICEConnectionStateChangeHandler atomic.Value // func(webrtc.ICEConnectionState)
 
 	closeOnce sync.Once
 }
 
 func NewPublisher(id string, session *Session, cfg WebRTCTransportConfig) (*Publisher, error) {
-	me, err := getPublisherMediaEngine()
+	me, err := getMediaEngine()
 	if err != nil {
 		log.Errorf("NewPeer error: %v", err)
 		return nil, errPeerConnectionInitFailed
@@ -51,13 +53,27 @@ func NewPublisher(id string, session *Session, cfg WebRTCTransportConfig) (*Publ
 		}
 	})
 
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		if dc.Label() == APIChannelLabel {
+			// terminate api data channel
+			log.Infof("publisher onDataChannel")
+			return
+		}
+		p.session.AddDatachannel(id, dc)
+	})
+
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Debugf("PeerId: %s, Publisher ice connection state: %s", p.id, state)
 		switch state {
 		case webrtc.ICEConnectionStateFailed:
 			fallthrough
 		case webrtc.ICEConnectionStateClosed:
+			log.Debugf("webrtc ice closed for peer: %s", p.id)
 			p.Close()
+		}
+
+		if handler, ok := p.onICEConnectionStateChangeHandler.Load().(func(webrtc.ICEConnectionState)); ok && handler != nil {
+			handler(state)
 		}
 	})
 	return p, nil
@@ -76,24 +92,35 @@ func (p *Publisher) Close() {
 	})
 }
 
+func (p *Publisher) OnICEConnectionStateChange(f func(connectionState webrtc.ICEConnectionState)) {
+	p.onICEConnectionStateChangeHandler.Store(f)
+}
+
 // Answer 接收offer，返回answer
 func (p *Publisher) Answer(offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 	if err := p.pc.SetRemoteDescription(offer); err != nil {
-		log.Errorf("PeerId: %s, publisher setRemoteSDP error: %v", err)
+		log.Errorf("PeerId: %s, publisher setRemoteSDP error: %v", p.id, err)
 		return webrtc.SessionDescription{}, err
 	}
 
 	answer, err := p.pc.CreateAnswer(nil)
 	if err != nil {
-		log.Errorf("PeerId: %s, publisher CreateAnswer error: %v", err)
+		log.Errorf("PeerId: %s, publisher CreateAnswer error: %v", p.id, err)
 		return webrtc.SessionDescription{}, err
 	}
 
+	gatherComplete := webrtc.GatheringCompletePromise(p.pc)
 	if err := p.pc.SetLocalDescription(answer); err != nil {
-		log.Errorf("PeerId: %s, publisher SetLocalDescription error: %v", err)
+		log.Errorf("PeerId: %s, publisher SetLocalDescription error: %v", p.id, err)
 		return webrtc.SessionDescription{}, err
 	}
+	<-gatherComplete
 	return answer, nil
+}
+
+// OnICECandidate handler
+func (p *Publisher) OnICECandidate(f func(c *webrtc.ICECandidate)) {
+	p.pc.OnICECandidate(f)
 }
 
 func (p *Publisher) GetRouter() Router {

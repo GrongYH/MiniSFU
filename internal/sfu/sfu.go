@@ -1,6 +1,8 @@
 package sfu
 
 import (
+	"fmt"
+	"github.com/pion/ice/v2"
 	"github.com/pion/webrtc/v3"
 	"mini-sfu/internal/buffer"
 	"mini-sfu/internal/log"
@@ -24,8 +26,9 @@ type Config struct {
 // SFU represents an sfu instance
 type SFU struct {
 	sync.RWMutex
-	webrtc   WebRTCTransportConfig
-	sessions map[string]*Session
+	webrtc       WebRTCTransportConfig
+	sessions     map[string]*Session
+	dataChannels []*DataChannel
 }
 
 var (
@@ -74,6 +77,8 @@ func NewWebRTCTransportConfig(c Config) WebRTCTransportConfig {
 		sdpSemantics = webrtc.SDPSemanticsPlanB
 	}
 
+	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+
 	return WebRTCTransportConfig{
 		configuration: webrtc.Configuration{
 			SDPSemantics: sdpSemantics,
@@ -95,7 +100,11 @@ func NewSFU(c Config) *SFU {
 
 // newSession 创建一个session实例并加入sfu
 func (s *SFU) newSession(id string) *Session {
-	session := NewSession(id)
+	fmt.Println()
+	log.Debugf("%d", len(s.dataChannels))
+	fmt.Println()
+
+	session := NewSession(id, s.dataChannels)
 	session.OnClose(func() {
 		s.Lock()
 		delete(s.sessions, id)
@@ -123,4 +132,10 @@ func (s *SFU) GetSession(sid string) (*Session, WebRTCTransportConfig) {
 		session = s.newSession(sid)
 	}
 	return session, s.webrtc
+}
+
+func (s *SFU) NewDatachannel(label string) *DataChannel {
+	dc := &DataChannel{Label: label}
+	s.dataChannels = append(s.dataChannels, dc)
+	return dc
 }

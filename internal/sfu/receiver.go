@@ -20,10 +20,10 @@ type Receiver interface {
 	SSRC(layer int) uint32
 	AddUpTrack(track *webrtc.TrackRemote, buff *buffer.Buffer)
 	AddDownTrack(track *DownTrack, bestQualityFirst bool)
-	DeleteDownTrack(layer int, id string)
 	SubDownTrack(track *DownTrack, layer int) error
-	RetransmitPackets(track *DownTrack, packets []packetMeta) error
+	DeleteDownTrack(layer int, id string)
 	GetBitrate() [3]uint64
+	RetransmitPackets(track *DownTrack, packets []packetMeta) error
 	OnCloseHandler(f func())
 	SendRTCP(p []rtcp.Packet)
 	SetRTCPCh(rtcp chan []rtcp.Packet)
@@ -75,10 +75,12 @@ func (w *WebRTCReceiver) TrackID() string {
 }
 
 func (w *WebRTCReceiver) Codec() webrtc.RTPCodecParameters {
+	log.Debugf("receiver codec %v", w.codec)
 	return w.codec
 }
 
 func (w *WebRTCReceiver) Kind() webrtc.RTPCodecType {
+	log.Debugf("receiver kind %v", w.kind)
 	return w.kind
 }
 

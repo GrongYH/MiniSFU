@@ -73,7 +73,7 @@ func (n *sequencer) push(sn, offSn uint16, timeStamp uint32, layer uint8, head b
 		pos = n.step - int(n.headSN-offSn)
 		if pos < 0 {
 			if pos*-1 >= maxPacketMetaHistory {
-				log.Errorf("Old packet received, can not be sequenced", "head", sn, "received", offSn)
+				log.Errorf("Old packet received, can not be sequenced, head %d, received %d", sn, offSn)
 				return nil
 			}
 			pos = maxPacketMetaHistory + pos

@@ -110,6 +110,7 @@ func startMetrics(addr string) {
 		log.Errorf("debug server stopped. got err: %s", err)
 	}
 }
+
 func main() {
 	if !parse() {
 		showHelp()
@@ -118,6 +119,7 @@ func main() {
 	log.Init("debug")
 	log.Infof("--- Starting SFU Node ---")
 	s := sfu.NewSFU(conf)
+	s.NewDatachannel(sfu.APIChannelLabel)
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true

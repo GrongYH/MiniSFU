@@ -1,10 +1,16 @@
 package sfu
 
 import (
+	"fmt"
 	"github.com/lucsky/cuid"
 	"github.com/pion/webrtc/v3"
 	"mini-sfu/internal/log"
 	"sync"
+)
+
+const (
+	publisher  = 0
+	subscriber = 1
 )
 
 type SessionProvider interface {
@@ -24,6 +30,7 @@ type Peer struct {
 
 	OnOffer                    func(*webrtc.SessionDescription)
 	OnICEConnectionStateChange func(state webrtc.ICEConnectionState)
+	OnIceCandidate             func(*webrtc.ICECandidateInit, int)
 
 	remoteAnswerPending bool
 	negotiationPending  bool
@@ -52,6 +59,7 @@ func (p *Peer) Join(sid string) error {
 
 	// 根据sessionID, 从SFU中获取该session
 	p.session, cfg = p.provider.GetSession(sid)
+
 	p.subscriber, err = NewSubscriber(p.id, cfg)
 	if err != nil {
 		log.Errorf("error creating subscriber pc: %v", err)
@@ -61,6 +69,12 @@ func (p *Peer) Join(sid string) error {
 	if err != nil {
 		log.Errorf("error creating publisher pc: %v", err)
 		return errPeerConnectionInitFailed
+	}
+
+	for _, dc := range p.session.dataChannels {
+		if err := p.subscriber.AddDatachannel(p, dc); err != nil {
+			return fmt.Errorf("error setting subscriber default dc datachannel")
+		}
 	}
 
 	// 需要协商时，subscriber创建offer并发给对端
@@ -83,11 +97,42 @@ func (p *Peer) Join(sid string) error {
 
 		p.remoteAnswerPending = true
 		// 如果subscriber有offer生成，则将offer发送给对端
-		if p.OnOffer != nil && p.closed.get() {
+		if p.OnOffer != nil && !p.closed.get() {
 			log.Infof("peer %s send offer", p.id)
 			p.OnOffer(&offer)
 		}
 	})
+
+	p.publisher.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
+		if p.OnICEConnectionStateChange != nil && !p.closed.get() {
+			p.OnICEConnectionStateChange(s)
+		}
+	})
+
+	p.subscriber.OnICECandidate(func(c *webrtc.ICECandidate) {
+		log.Debugf("on subscriber ice candidate called for peer " + p.id)
+		if c == nil {
+			return
+		}
+
+		if p.OnIceCandidate != nil && !p.closed.get() {
+			json := c.ToJSON()
+			p.OnIceCandidate(&json, subscriber)
+		}
+	})
+
+	p.publisher.OnICECandidate(func(c *webrtc.ICECandidate) {
+		log.Debugf("on publisher ice candidate called for peer " + p.id)
+		if c == nil {
+			return
+		}
+
+		if p.OnIceCandidate != nil && !p.closed.get() {
+			json := c.ToJSON()
+			p.OnIceCandidate(&json, publisher)
+		}
+	})
+
 	p.session.AddPeer(p)
 	log.Infof("peer %s join session %s", p.id, sid)
 	//加入房间时订阅Session内所有Peer
@@ -100,20 +145,21 @@ func (p *Peer) Answer(offer webrtc.SessionDescription) (*webrtc.SessionDescripti
 	if p.publisher == nil {
 		return nil, ErrNoTransportEstablished
 	}
-	log.Infof("peer %s got offer: %s", p.id, offer.SDP)
+	log.Infof("peer %s got offer", p.id)
 
 	// 如果处于unstable状态，忽略本次offer
 	// 本文介绍了webrtc信令状态机和完美协商 https://juejin.cn/post/7014074633347416072
 	if p.publisher.SignalingState() != webrtc.SignalingStateStable {
 		return nil, ErrOfferIgnored
 	}
+
 	answer, err := p.publisher.Answer(offer)
 	if err != nil {
 		log.Errorf("error create answer for peer %s", p.id)
 		return nil, err
 	}
-	log.Infof("peer %s send answer", p.id)
-	log.Infof("%s", answer.SDP)
+	//log.Infof("peer %s send answer", p.id)
+	//log.Infof("%s", answer.SDP)
 	return &answer, nil
 }
 
@@ -126,7 +172,7 @@ func (p *Peer) SetRemoteDescription(answer webrtc.SessionDescription) error {
 	p.Lock()
 	defer p.Unlock()
 
-	log.Infof("peer %s got answer", p.id)
+	log.Infof("SetRemoteDescription: peer %s got answer, %s", p.id, answer.SDP)
 	if err := p.subscriber.SetRemoteDescription(answer); err != nil {
 		log.Errorf("peer %s set remote description failed: %v", p.id, err)
 		return err
@@ -135,9 +181,11 @@ func (p *Peer) SetRemoteDescription(answer webrtc.SessionDescription) error {
 	p.remoteAnswerPending = false
 	// 上一次协商结束后，如果本次协商处于pending状态，则进行本次协商
 	if p.negotiationPending {
+		log.Debugf("negotiationPending is true")
 		p.negotiationPending = false
 		p.subscriber.negotiate()
 	}
+	log.Debugf("set remote sdp success")
 	return nil
 }
 

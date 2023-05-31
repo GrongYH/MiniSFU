@@ -1,11 +1,13 @@
 package sfu
 
 import (
-	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v3"
+	"sync"
+
 	"mini-sfu/internal/buffer"
 	"mini-sfu/internal/log"
-	"sync"
+
+	"github.com/pion/rtcp"
+	"github.com/pion/webrtc/v3"
 )
 
 type RouterConfig struct {
@@ -152,7 +154,7 @@ func (r *router) AddDownTracks(s *Subscriber, recv Receiver) error {
 			return err
 		}
 		s.negotiate()
-
+		return nil
 	}
 
 	if len(r.receivers) > 0 {
@@ -185,7 +187,6 @@ func (r *router) addDownTrack(sub *Subscriber, recv Receiver) error {
 	//	log.Errorf("peer %s subscriber register codec failed, error: %v", sub.id, err)
 	//	return err
 	//}
-	//sub.me.RegisterDefaultCodecs()
 	//log.Debugf("sub.me %v", sub.me)
 
 	// 创建downTrack，用于给客户端下发流，downTrack标识了被谁订阅

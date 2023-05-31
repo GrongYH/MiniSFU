@@ -1,15 +1,17 @@
 package sfu
 
 import (
+	"io"
+	"sync"
+	"time"
+
+	"mini-sfu/internal/buffer"
+	"mini-sfu/internal/log"
+
 	"github.com/gammazero/workerpool"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"io"
-	"mini-sfu/internal/buffer"
-	"mini-sfu/internal/log"
-	"sync"
-	"time"
 )
 
 type Receiver interface {
@@ -197,6 +199,7 @@ func (w *WebRTCReceiver) SubDownTrack(track *DownTrack, layer int) error {
 
 // writeRTP 每添加一个UpTrack，就开始启动发包流程
 func (w *WebRTCReceiver) writeRTP(layer int) {
+	log.Infof("start to write to layer %d", layer)
 	defer func() {
 		w.closeOnce.Do(func() {
 			go w.closeTracks()
@@ -230,6 +233,7 @@ func (w *WebRTCReceiver) writeRTP(layer int) {
 
 // RetransmitPackets 根据偏移后的SN从sequencer里面找到发送包号，并根据发送包号从buffer中取出缓存的packet
 func (w *WebRTCReceiver) RetransmitPackets(track *DownTrack, packets []packetMeta) error {
+	log.Debugf("send RetransmitPackets")
 	if w.nackWorker.Stopped() {
 		return io.ErrClosedPipe
 	}

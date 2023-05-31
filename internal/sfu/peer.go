@@ -2,10 +2,12 @@ package sfu
 
 import (
 	"fmt"
+	"sync"
+
+	"mini-sfu/internal/log"
+
 	"github.com/lucsky/cuid"
 	"github.com/pion/webrtc/v3"
-	"mini-sfu/internal/log"
-	"sync"
 )
 
 const (
@@ -145,7 +147,7 @@ func (p *Peer) Answer(offer webrtc.SessionDescription) (*webrtc.SessionDescripti
 	if p.publisher == nil {
 		return nil, ErrNoTransportEstablished
 	}
-	log.Infof("peer %s got offer", p.id)
+	log.Infof("peer %s got offer， %s", p.id, offer.SDP)
 
 	// 如果处于unstable状态，忽略本次offer
 	// 本文介绍了webrtc信令状态机和完美协商 https://juejin.cn/post/7014074633347416072
@@ -158,8 +160,8 @@ func (p *Peer) Answer(offer webrtc.SessionDescription) (*webrtc.SessionDescripti
 		log.Errorf("error create answer for peer %s", p.id)
 		return nil, err
 	}
-	//log.Infof("peer %s send answer", p.id)
-	//log.Infof("%s", answer.SDP)
+	log.Infof("peer %s send answer", p.id)
+	log.Infof("%s", answer.SDP)
 	return &answer, nil
 }
 
@@ -172,7 +174,7 @@ func (p *Peer) SetRemoteDescription(answer webrtc.SessionDescription) error {
 	p.Lock()
 	defer p.Unlock()
 
-	log.Infof("SetRemoteDescription: peer %s got answer, %s", p.id, answer.SDP)
+	//log.Infof("SetRemoteDescription: peer %s got answer, %s", p.id, answer.SDP)
 	if err := p.subscriber.SetRemoteDescription(answer); err != nil {
 		log.Errorf("peer %s set remote description failed: %v", p.id, err)
 		return err
@@ -206,6 +208,24 @@ func (p *Peer) Close() {
 	if p.subscriber != nil {
 		p.subscriber.Close()
 	}
+}
+
+// Trickle candidates available for this peer
+func (p *Peer) Trickle(candidate webrtc.ICECandidateInit, target int) error {
+	if p.subscriber == nil || p.publisher == nil {
+		return ErrNoTransportEstablished
+	}
+	switch target {
+	case publisher:
+		if err := p.publisher.AddICECandidate(candidate); err != nil {
+			return fmt.Errorf("error setting ice candidate: %s", err)
+		}
+	case subscriber:
+		if err := p.subscriber.AddICECandidate(candidate); err != nil {
+			return fmt.Errorf("error setting ice candidate: %s", err)
+		}
+	}
+	return nil
 }
 
 func (p *Peer) Subscriber() *Subscriber {

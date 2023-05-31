@@ -1,14 +1,15 @@
 package sfu
 
 import (
-	"github.com/pion/rtcp"
-	"mini-sfu/internal/buffer"
-	"mini-sfu/internal/log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"mini-sfu/internal/buffer"
+	"mini-sfu/internal/log"
+
+	"github.com/pion/rtcp"
 	"github.com/pion/transport/v2/packetio"
 	"github.com/pion/webrtc/v3"
 )
@@ -192,6 +193,7 @@ func (d *DownTrack) CreateSenderReport() *rtcp.SenderReport {
 	diffTs := uint32((now/1e6)-lastPktMs) * d.codec.ClockRate / 1000
 	octets := atomic.LoadUint32(&d.octetCount)
 	packets := atomic.LoadUint32(&d.packetCount)
+	//log.Debugf("diffTs:%d, octets:%d, packets:%d", diffTs, octets, packets)
 	return &rtcp.SenderReport{
 		SSRC:        d.ssrc,
 		NTPTime:     nowNTP,
@@ -394,6 +396,7 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 		case *rtcp.PictureLossIndication:
 			//PLI报文，转发给发送端
 			if pliOnce {
+				log.Debugf("recv PLI...")
 				p.MediaSSRC = d.lastSSRC
 				p.SenderSSRC = d.lastSSRC
 				fwdPkts = append(fwdPkts, p)
@@ -401,6 +404,7 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 			}
 			log.Debugf("PLI Packet Forward")
 		case *rtcp.FullIntraRequest:
+			log.Debugf("recv FIR...")
 			//PIR报文，转发给发送端
 			if firOnce {
 				p.MediaSSRC = d.lastSSRC
@@ -409,11 +413,13 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 				firOnce = false
 			}
 		case *rtcp.ReceiverEstimatedMaximumBitrate:
+			//log.Infof("down bitrate %d", uint64(p.Bitrate))
 			//REMB报文，反馈接收端的带宽情况，记录该带宽值
 			if expectedMinBitrate == 0 || expectedMinBitrate > uint64(p.Bitrate) {
 				expectedMinBitrate = uint64(p.Bitrate)
 			}
 		case *rtcp.ReceiverReport:
+			//log.Debugf("recv RR...")
 			//RR报文，记录所有ReceptionReport里面的最大丢包率
 			for _, r := range p.Reports {
 				if maxRatePacketLoss == 0 || maxRatePacketLoss < r.FractionLost {
@@ -421,6 +427,7 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 				}
 			}
 		case *rtcp.TransportLayerNack:
+			log.Debugf("recv nack...")
 			if d.sequencer != nil {
 				var nackedPackets []packetMeta
 				for _, pair := range p.Nacks {
@@ -430,7 +437,10 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 					return
 				}
 			}
+		case *rtcp.TransportLayerCC:
+			log.Infof("twcc")
 		}
+
 		// 获取接收端带宽值和丢包率情况后，进入simulcast切换逻辑
 		if d.trackType == SimulcastDownTrack && (maxRatePacketLoss != 0 || expectedMinBitrate != 0) {
 			d.handlerLayerChange(maxRatePacketLoss, expectedMinBitrate)
@@ -447,7 +457,7 @@ func (d *DownTrack) handlerLayerChange(maxRatePacketLoss uint8, expectedMinBitra
 	spatialLayer := atomic.LoadInt32(&d.spatialLayer)
 	currentLayer := int64(spatialLayer & 0x0f)
 	targetLayer := int64(spatialLayer >> 16)
-
+	log.Infof("switch layer, currentLayer %d, targetLayer %d", currentLayer, targetLayer)
 	if targetLayer == currentLayer {
 		if time.Now().After(d.simulcast.switchDelay) {
 			brs := d.receiver.GetBitrate()

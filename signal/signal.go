@@ -27,6 +27,12 @@ type JSONSignal struct {
 	*sfu.Peer
 }
 
+// Trickle message sent when renegotiating the peer connection
+type Trickle struct {
+	Target    int                     `json:"target"`
+	Candidate webrtc.ICECandidateInit `json:"candidate"`
+}
+
 func NewJSONSignal(p *sfu.Peer) *JSONSignal {
 	return &JSONSignal{p}
 }
@@ -56,14 +62,15 @@ func (p *JSONSignal) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonr
 			}
 		}
 
-		//p.OnIceCandidate = func(candidate *webrtc.ICECandidateInit, target int) {
-		//	if err := conn.Notify(ctx, "trickle", Trickle{
-		//		Candidate: *candidate,
-		//		Target:    target,
-		//	}); err != nil {
-		//		log.Errorf("error sending ice candidate %s", err)
-		//	}
-		//}
+		p.OnIceCandidate = func(candidate *webrtc.ICECandidateInit, target int) {
+			log.Debugf("send ice to client, %s", candidate.Candidate)
+			if err := conn.Notify(ctx, "trickle", Trickle{
+				Candidate: *candidate,
+				Target:    target,
+			}); err != nil {
+				log.Errorf("error sending ice candidate %s", err)
+			}
+		}
 
 		err = p.Join(join.Sid)
 		if err != nil {
@@ -100,9 +107,24 @@ func (p *JSONSignal) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonr
 			replyError(err)
 			break
 		}
-		log.Infof("get answer %s", negotiation.Desc.SDP)
+		//log.Infof("get answer %s", negotiation.Desc.SDP)
 
 		err = p.SetRemoteDescription(negotiation.Desc)
+		if err != nil {
+			replyError(err)
+		}
+
+	case "trickle":
+		var trickle Trickle
+		err := json.Unmarshal(*req.Params, &trickle)
+		if err != nil {
+			log.Errorf("connect: error parsing candidate: %v", err)
+			replyError(err)
+			break
+		}
+		log.Infof("trickle candidate %s", trickle.Candidate.Candidate)
+
+		err = p.Trickle(trickle.Candidate, trickle.Target)
 		if err != nil {
 			replyError(err)
 		}

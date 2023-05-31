@@ -3,11 +3,12 @@ package buffer
 import (
 	"encoding/binary"
 	"io"
-	"mini-sfu/internal/log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"mini-sfu/internal/log"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -405,6 +406,7 @@ func (b *Buffer) calc(pkt []byte, arrivalTime int64) {
 	// 每秒计算一次带宽
 	if diff >= reportDelta {
 		bitrate := (8 * b.bitrateHelper * uint64(reportDelta)) / uint64(diff)
+		//log.Debugf("Up bitrate:%d bps", bitrate)
 		atomic.StoreUint64(&b.bitrate, bitrate)
 		b.feedbackCB(b.getRTCP())
 		b.lastReport = arrivalTime
@@ -414,8 +416,7 @@ func (b *Buffer) calc(pkt []byte, arrivalTime int64) {
 
 func (b *Buffer) buildREMBPacket() *rtcp.ReceiverEstimatedMaximumBitrate {
 	br := b.bitrate
-	//log.Debugf("bitrate is %d", br)
-
+	//log.Debugf("Up bitrate:%d bps", br)
 	if b.stats.LostRate < 0.02 {
 		br = uint64(float64(br)*1.09) + 2000
 	}

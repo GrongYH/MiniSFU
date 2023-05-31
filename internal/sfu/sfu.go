@@ -2,11 +2,16 @@ package sfu
 
 import (
 	"fmt"
-	"github.com/pion/ice/v2"
-	"github.com/pion/webrtc/v3"
+	"math/rand"
+	"runtime"
+	"sync"
+	"time"
+
 	"mini-sfu/internal/buffer"
 	"mini-sfu/internal/log"
-	"sync"
+
+	"github.com/pion/ice/v2"
+	"github.com/pion/webrtc/v3"
 )
 
 // WebRTCTransportConfig 定义了ice参数
@@ -17,13 +22,13 @@ type WebRTCTransportConfig struct {
 }
 
 type Config struct {
-	IceLite      bool         `mapstructure:"iceLite"`
-	ICEPortRange []uint16     `mapstructure:"portRange"`
+	IceLite      bool         `json:"iceLite"`
+	NAT1To1IPs   []string     `json:"nat1To1IPs"`
+	ICEPortRange []uint16     `json:"icePortRange"`
 	SDPSemantics string       `json:"sdpSemantics"`
 	Router       RouterConfig `json:"router"`
 }
 
-// SFU represents an sfu instance
 type SFU struct {
 	sync.RWMutex
 	webrtc       WebRTCTransportConfig
@@ -54,8 +59,11 @@ func NewWebRTCTransportConfig(c Config) WebRTCTransportConfig {
 		icePortStart = c.ICEPortRange[0]
 		icePortEnd = c.ICEPortRange[1]
 	}
+	log.Infof("setting ice udp range len %d ", len(c.ICEPortRange))
+	log.Infof("setting ice udp range %d to %d", icePortStart, icePortEnd)
 
 	if icePortStart != 0 || icePortEnd != 0 {
+		log.Infof("setting ice udp range %d to %d", icePortStart, icePortEnd)
 		if err := se.SetEphemeralUDPPortRange(icePortStart, icePortEnd); err != nil {
 			log.Panicf("setting ice udp range error")
 		}
@@ -64,6 +72,10 @@ func NewWebRTCTransportConfig(c Config) WebRTCTransportConfig {
 	// 设置为iceLite模式
 	if c.IceLite {
 		se.SetLite(c.IceLite)
+	}
+
+	if len(c.NAT1To1IPs) > 0 {
+		se.SetNAT1To1IPs(c.NAT1To1IPs, webrtc.ICECandidateTypeHost)
 	}
 
 	//将buffer设置为自定义buffer
@@ -90,11 +102,16 @@ func NewWebRTCTransportConfig(c Config) WebRTCTransportConfig {
 
 // NewSFU creates a new sfu instance
 func NewSFU(c Config) *SFU {
+	// Init random seed
+	rand.Seed(time.Now().UnixNano())
+	// Init ballast
+	ballast := make([]byte, 0)
 	w := NewWebRTCTransportConfig(c)
 	s := &SFU{
 		webrtc:   w,
 		sessions: make(map[string]*Session),
 	}
+	runtime.KeepAlive(ballast)
 	return s
 }
 

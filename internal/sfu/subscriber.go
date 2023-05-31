@@ -2,13 +2,15 @@ package sfu
 
 import (
 	"context"
+	"io"
+	"sync"
+	"time"
+
+	"mini-sfu/internal/log"
+
 	"github.com/bep/debounce"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
-	"io"
-	"mini-sfu/internal/log"
-	"sync"
-	"time"
 )
 
 const APIChannelLabel = "mini-sfu"
@@ -20,8 +22,9 @@ type Subscriber struct {
 	pc *webrtc.PeerConnection
 	me *webrtc.MediaEngine
 
-	tracks   map[string][]*DownTrack
-	channels map[string]*webrtc.DataChannel
+	tracks     map[string][]*DownTrack
+	channels   map[string]*webrtc.DataChannel
+	candidates []webrtc.ICECandidateInit
 
 	negotiate func()
 
@@ -30,12 +33,13 @@ type Subscriber struct {
 
 // NewSubscriber 建立一个空pc
 func NewSubscriber(id string, cfg WebRTCTransportConfig) (*Subscriber, error) {
-	me, err := getMediaEngine()
+	me, err := getSubscriberMediaEngine()
 	if err != nil {
 		log.Errorf("NewPeer error: %v", err)
 		return nil, errPeerConnectionInitFailed
 	}
 
+	//me := &webrtc.MediaEngine{}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithSettingEngine(cfg.setting))
 	pc, err := api.NewPeerConnection(cfg.configuration)
 
@@ -45,11 +49,12 @@ func NewSubscriber(id string, cfg WebRTCTransportConfig) (*Subscriber, error) {
 	}
 
 	s := &Subscriber{
-		id:       id,
-		pc:       pc,
-		me:       me,
-		tracks:   make(map[string][]*DownTrack),
-		channels: make(map[string]*webrtc.DataChannel),
+		id:         id,
+		pc:         pc,
+		me:         me,
+		tracks:     make(map[string][]*DownTrack),
+		channels:   make(map[string]*webrtc.DataChannel),
+		candidates: make([]webrtc.ICECandidateInit, 0, 10),
 	}
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -143,7 +148,7 @@ func (s *Subscriber) CreateOffer() (webrtc.SessionDescription, error) {
 		return webrtc.SessionDescription{}, err
 	}
 	//<-gatherComplete
-	log.Debugf("PeerId: %s, subscriber createOffer success, offer: %s", s.id, offer.SDP)
+	//log.Infof("PeerId: %s, subscriber createOffer success, offer: %s", s.id, offer.SDP)
 	return offer, nil
 }
 
@@ -159,6 +164,15 @@ func (s *Subscriber) SetRemoteDescription(des webrtc.SessionDescription) error {
 		log.Errorf("PeerId: %s, subscriber SetRemoteDescription error: %v", s.id, err)
 		return err
 	}
+
+	log.Debugf("subscriber candidate, %v", s.candidates)
+	for _, c := range s.candidates {
+		if err := s.pc.AddICECandidate(c); err != nil {
+			log.Errorf("Add subscriber ice candidate to peer %s err: %v", s.id, err)
+		}
+	}
+	s.candidates = nil
+
 	log.Debugf("PeerId: %s, Subscriber SetRemoteDescription success", s.id)
 	return nil
 }
@@ -204,14 +218,23 @@ func (s *Subscriber) RemoveDownTrack(streamID string, downTrack *DownTrack) {
 	}
 }
 
+// AddICECandidate to peer connection
+func (s *Subscriber) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+	if s.pc.RemoteDescription() != nil {
+		log.Debugf("subscriber add trickle ice candidate")
+		return s.pc.AddICECandidate(candidate)
+	}
+	s.candidates = append(s.candidates, candidate)
+	return nil
+}
+
 // sendStreamDownTracksReports 给subscriber pc 发送源描述报文
 // SDES报文是用来描述（音视频）媒体源的。
 // 唯一有价值的是CNAME项，其作用是将不同的源（SSRC）绑定到同一个CNAME上。
 // 比如当SSRC有冲突时，可以通过CNAME将旧的SSRC更换成新的SSRC，从而保证在通信的每个SSRC都是唯一的。
 func (s *Subscriber) sendStreamDownTracksReports(streamID string) {
-	var r []rtcp.Packet
-	var sd []rtcp.SourceDescriptionChunk
-
+	r := make([]rtcp.Packet, 0, 10)
+	sd := make([]rtcp.SourceDescriptionChunk, 0, 20)
 	s.RLock()
 	dts := s.tracks[streamID]
 	for _, dt := range dts {
@@ -250,8 +273,8 @@ func (s *Subscriber) downTracksReports() {
 			return
 		}
 
-		var r []rtcp.Packet
-		var sd []rtcp.SourceDescriptionChunk
+		r := make([]rtcp.Packet, 0, 10)
+		sd := make([]rtcp.SourceDescriptionChunk, 0, 20)
 		s.RLock()
 		for _, dts := range s.tracks {
 			for _, dt := range dts {
@@ -274,6 +297,7 @@ func (s *Subscriber) downTracksReports() {
 			nsd := sd[j*15 : i]
 			r = append(r, &rtcp.SourceDescription{Chunks: nsd})
 			j++
+			log.Debugf("send downTrack report, %d", len(r))
 			if err := s.pc.WriteRTCP(r); err != nil {
 				if err == io.EOF || err == io.ErrClosedPipe {
 					return

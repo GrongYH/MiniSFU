@@ -1,14 +1,3 @@
-//package sfu
-//
-//import (
-//	"context"
-//	"github.com/pion/webrtc/v3"
-//)
-
-//type DataChannel struct {
-//	Label string
-//}
-
 package sfu
 
 import (

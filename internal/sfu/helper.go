@@ -1,9 +1,10 @@
 package sfu
 
 import (
-	"github.com/pion/webrtc/v3"
 	"strings"
 	"sync/atomic"
+
+	"github.com/pion/webrtc/v3"
 )
 
 const (

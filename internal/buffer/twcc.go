@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	tccReportDelta          = 1e8  //10ms
-	tccReportDeltaAfterMark = 50e6 //50ms
+	tccReportDelta          = 1e8 //10ms
+	tccReportDeltaAfterMark = 5e8 //50ms
 )
 
 // rtp 扩展信息
@@ -36,8 +36,8 @@ type Responder struct {
 	sSSRC uint32
 	mSSRC uint32
 
-	len      uint16
-	deltaLen uint16
+	len      uint16 // 报头+chunk的长度
+	deltaLen uint16 // delta的长度
 	payload  [100]byte
 	deltas   [200]byte
 	chunk    uint16
@@ -76,6 +76,7 @@ func (t *Responder) Push(sn uint16, timeNS int64, marker bool) {
 	if len(t.extInfo) > 20 && t.mSSRC != 0 && (delta >= tccReportDelta) ||
 		len(t.extInfo) > 100 ||
 		(marker && delta >= tccReportDeltaAfterMark) {
+		//log.Infof("len(t.extInfo):%d, delta:%d, marker:%d", len(t.extInfo), delta, marker)
 		if pkt := t.buildTransportCCPacket(); pkt != nil {
 			t.onFeedback(pkt)
 		}
@@ -115,6 +116,7 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 		t.lastExtSN = tccExtInfo.ExtTSN
 		tccPkts = append(tccPkts, tccExtInfo)
 	}
+
 	//清空extInfo
 	t.extInfo = t.extInfo[:0]
 
@@ -163,7 +165,7 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 			// 拿数组里面的第一个包计算base sn,packet status count, reference time, 一定会触发该逻辑
 			if !firstRecv {
 				firstRecv = true
-				//计算refTime := stat.Timestamp(us)/64ms(64000us)，经验参数
+				//计算refTime := stat.Timestamp(us)/64ms(64000us)
 				refTime := stat.Timestamp / 64e3
 				timestamp = refTime * 64e3                                                      // 时间戳的整数
 				t.writeHeader(uint16(tccPkts[0].ExtTSN), uint16(len(tccPkts)), uint32(refTime)) //写入twcc头
@@ -171,12 +173,13 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 				t.pktCtn++
 			}
 
-			// 计算该序号的delta，差值delta=(每个包的真实时间戳(us)-基准时间戳)/250us
+			// 计算该序号的delta，差值delta=(每个包的真实时间戳(us)-基准时间戳(us))/250us
 			delta = (stat.Timestamp - timestamp) / 250
 			// 如果超出255，则需要16位的large delta
 			if delta < 0 || delta > 255 {
 				status = rtcp.TypeTCCPacketReceivedLargeDelta
 				rDelta := int16(delta)
+				// 判断delta是否越界
 				if int64(rDelta) != delta {
 					if rDelta > 0 {
 						rDelta = math.MaxInt16
@@ -191,7 +194,7 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 				status = rtcp.TypeTCCPacketReceivedSmallDelta
 				t.writeDelta(status, uint16(delta))
 			}
-			// 记录时间戳
+			// 记录该包到达的时间戳作为新的基准时间
 			timestamp = stat.Timestamp
 		}
 
@@ -216,7 +219,7 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 		}
 		lastStatus = status
 
-		//如果几个包类型不同，并且包含TypeTCCPacketReceivedLargeDelta状态，则最多存7个，写入statusSymbolChunk
+		//如果几个包类型不同，并且包含TypeTCCPacketReceivedLargeDelta状态，则最多存7个，写入statusSymbolChunk，此时为Status vector chunk
 		if !same && maxStatus == rtcp.TypeTCCPacketReceivedLargeDelta && statusList.Len() > 6 {
 			for i := 0; i < 7; i++ {
 				t.createStatusSymbolChunk(rtcp.TypeTCCSymbolSizeTwoBit, statusList.PopFront(), i)
@@ -226,6 +229,7 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 			maxStatus = rtcp.TypeTCCPacketNotReceived
 			same = true
 
+			//重新整理队列中其余的包
 			for i := 0; i < statusList.Len(); i++ {
 				status = statusList.At(i)
 				if status > maxStatus {
@@ -236,7 +240,6 @@ func (t *Responder) buildTransportCCPacket() rtcp.RawPacket {
 				}
 				lastStatus = status
 			}
-
 			//如果几个包类型不同，并且不包含TypeTCCPacketReceivedLargeDelta状态，则最多存14个，写入StatusSymbolChunk
 		} else if !same && statusList.Len() > 13 {
 			for i := 0; i < 14; i++ {

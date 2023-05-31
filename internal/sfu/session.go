@@ -1,9 +1,11 @@
 package sfu
 
 import (
-	"github.com/pion/webrtc/v3"
-	"mini-sfu/internal/log"
 	"sync"
+
+	"mini-sfu/internal/log"
+
+	"github.com/pion/webrtc/v3"
 )
 
 // Session 内的Peer会自动的订阅其他Peer
@@ -112,6 +114,7 @@ func (s *Session) Subscribe(peer *Peer) {
 	}
 	peer.subscriber.negotiate()
 }
+
 func (s *Session) OnClose(f func()) {
 	s.onCloseHandler = f
 }

@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pion/rtcp"
-
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 )
 

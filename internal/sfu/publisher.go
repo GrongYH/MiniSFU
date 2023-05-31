@@ -1,10 +1,12 @@
 package sfu
 
 import (
-	"github.com/pion/webrtc/v3"
-	"mini-sfu/internal/log"
 	"sync"
 	"sync/atomic"
+
+	"mini-sfu/internal/log"
+
+	"github.com/pion/webrtc/v3"
 )
 
 type Publisher struct {
@@ -13,6 +15,7 @@ type Publisher struct {
 
 	router                            Router
 	session                           *Session
+	candidates                        []webrtc.ICECandidateInit
 	onICEConnectionStateChangeHandler atomic.Value // func(webrtc.ICEConnectionState)
 
 	closeOnce sync.Once
@@ -34,10 +37,11 @@ func NewPublisher(id string, session *Session, cfg WebRTCTransportConfig) (*Publ
 
 	log.Infof("PeerId: %s， publisher pc init success", id)
 	p := &Publisher{
-		id:      id,
-		pc:      pc,
-		session: session,
-		router:  newRouter(id, pc, session, cfg.router),
+		id:         id,
+		pc:         pc,
+		session:    session,
+		router:     newRouter(id, pc, session, cfg.router),
+		candidates: make([]webrtc.ICECandidateInit, 0, 10),
 	}
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -103,19 +107,34 @@ func (p *Publisher) Answer(offer webrtc.SessionDescription) (webrtc.SessionDescr
 		return webrtc.SessionDescription{}, err
 	}
 
+	for _, c := range p.candidates {
+		if err := p.pc.AddICECandidate(c); err != nil {
+			log.Errorf("Add publisher ice candidate to peer %s err: %v", p.id, err)
+		}
+	}
+	p.candidates = nil
+
 	answer, err := p.pc.CreateAnswer(nil)
 	if err != nil {
 		log.Errorf("PeerId: %s, publisher CreateAnswer error: %v", p.id, err)
 		return webrtc.SessionDescription{}, err
 	}
 
-	gatherComplete := webrtc.GatheringCompletePromise(p.pc)
 	if err := p.pc.SetLocalDescription(answer); err != nil {
 		log.Errorf("PeerId: %s, publisher SetLocalDescription error: %v", p.id, err)
 		return webrtc.SessionDescription{}, err
 	}
-	<-gatherComplete
 	return answer, nil
+}
+
+// AddICECandidate to peer connection
+func (p *Publisher) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+	if p.pc.RemoteDescription() != nil {
+		log.Debugf("publisher add trickle ice candidate")
+		return p.pc.AddICECandidate(candidate)
+	}
+	p.candidates = append(p.candidates, candidate)
+	return nil
 }
 
 // OnICECandidate handler

@@ -77,7 +77,7 @@ func load() bool {
 		fmt.Printf("sfu config file %s loaded failed. %v\n", file, err)
 		return false
 	}
-
+	fmt.Printf("config ice port len %d, icelite: %d, sdpSemantics: %s, NAT1To1IP:%v\n", len(conf.ICEPortRange), conf.IceLite, conf.SDPSemantics, conf.NAT1To1IPs)
 	if len(conf.ICEPortRange) > 2 {
 		fmt.Printf("config file %s loaded failed. range port must be [min,max]\n", file)
 		return false

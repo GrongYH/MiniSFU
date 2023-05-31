@@ -2,9 +2,11 @@ package buffer
 
 import (
 	"encoding/binary"
-	"github.com/pion/rtcp"
 	"math"
+
 	"mini-sfu/internal/log"
+
+	"github.com/pion/rtcp"
 )
 
 // 一个rtp包的最大长度
@@ -84,7 +86,7 @@ func (b *Bucket) set(sn uint16, pkt []byte) []byte {
 	log.Debugf("sn: %d, pos:%d, maxStep:%d", sn, pos, b.maxSteps)
 	if pos < 0 {
 		// 说明buffer里面的包到达最后一个位置以后，又从buffer的第0个位置开始
-		pos = pos + b.maxSteps
+		pos = pos + b.maxSteps + 1
 	}
 	off := pos * maxPktSize
 	if off > len(b.buf) || off < 0 {
@@ -134,7 +136,7 @@ func (b *Bucket) get(sn uint16) []byte {
 		if pos*-1 > b.maxSteps {
 			return nil
 		}
-		pos = b.maxSteps + pos
+		pos = b.maxSteps + pos + 1
 	}
 	off := pos * maxPktSize
 	if off > len(b.buf) {

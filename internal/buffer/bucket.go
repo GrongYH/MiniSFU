@@ -35,8 +35,7 @@ func NewBucket(buf []byte, nack bool) *Bucket {
 	return b
 }
 
-// addPacket 先判断是不是乱序包，如果是之前丢失的包，就将该序号从NackQueue里面移除
-// 如果是乱序包，就需要将该包和上一次发的最后一个包之间的序号都加入NackQueue
+// addPacket 将pkt添加到缓存队列中
 func (b *Bucket) addPacket(pkt []byte, sn uint16, latest bool) []byte {
 	// 判断是否是第一次addPacket，如果是第一次，则b.headSN = sn - 1
 	// 如果不这样，就会使得0到sn之间的序号全都加入nackQueue
@@ -45,14 +44,16 @@ func (b *Bucket) addPacket(pkt []byte, sn uint16, latest bool) []byte {
 		b.init = true
 	}
 
+	//latest标识该序号是否是队列头部的，如果是之前丢失的包，就将该序号从NackQueue里面移除
 	if !latest {
 		if b.nacker != nil {
 			b.nacker.remove(sn)
 		}
 		return b.set(sn, pkt)
 	}
+
 	diff := sn - b.headSN
-	// （b.headSN, sn]之间的packet没有收到，添加到nacker队列
+	// 如果是队列头的序号，（b.headSN, sn]之间的packet没有收到，则将上一个次队列头和本次队列头之间的序号都添加到nackQueue
 	b.headSN = sn
 	for i := uint16(1); i < diff; i++ {
 		b.step++
@@ -68,6 +69,7 @@ func (b *Bucket) addPacket(pkt []byte, sn uint16, latest bool) []byte {
 		// 最多每接收两个包，就检验一次有没有丢包，调整一次NackQueue
 		np, akf := b.nacker.pairs()
 		if len(np) > 0 {
+			log.Debugf("up track send nack")
 			b.onLost(np, akf)
 		}
 	}
@@ -86,7 +88,7 @@ func (b *Bucket) set(sn uint16, pkt []byte) []byte {
 	log.Debugf("sn: %d, pos:%d, maxStep:%d", sn, pos, b.maxSteps)
 	if pos < 0 {
 		// 说明buffer里面的包到达最后一个位置以后，又从buffer的第0个位置开始
-		pos = pos + b.maxSteps + 1
+		pos = pos + b.maxSteps
 	}
 	off := pos * maxPktSize
 	if off > len(b.buf) || off < 0 {
@@ -136,7 +138,7 @@ func (b *Bucket) get(sn uint16) []byte {
 		if pos*-1 > b.maxSteps {
 			return nil
 		}
-		pos = b.maxSteps + pos + 1
+		pos = b.maxSteps + pos
 	}
 	off := pos * maxPktSize
 	if off > len(b.buf) {

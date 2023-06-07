@@ -99,7 +99,7 @@ func (s *Subscriber) AddDataChannel(label string) (*webrtc.DataChannel, error) {
 	s.Lock()
 	defer s.Unlock()
 
-	log.Infof("subscriber add dataChannel")
+	//log.Infof("subscriber add dataChannel")
 	if s.channels[label] != nil {
 		return s.channels[label], nil
 	}

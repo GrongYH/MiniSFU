@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"mini-sfu/internal/pacer"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,8 @@ type DownTrack struct {
 	onBind         func()
 	closeOnce      sync.Once
 
+	pacer pacer.Pacer
+
 	// Report helpers
 	octetCount   uint32
 	packetCount  uint32
@@ -77,12 +80,14 @@ type DownTrack struct {
 
 // NewDownTrack 需要实现 TrackLocal的方法，包括Bind，Unbind，ID，RID，StreamID， Kind
 func NewDownTrack(c webrtc.RTPCodecCapability, r Receiver, peerID string) (*DownTrack, error) {
+	pcr := pacer.NewBucketPacer(1000)
 	return &DownTrack{
 		id:       r.TrackID(),
 		peerID:   peerID,
 		streamID: r.StreamID(),
 		receiver: r,
 		codec:    c,
+		pacer:    pcr,
 	}, nil
 }
 
@@ -193,7 +198,7 @@ func (d *DownTrack) CreateSenderReport() *rtcp.SenderReport {
 	diffTs := uint32((now/1e6)-lastPktMs) * d.codec.ClockRate / 1000
 	octets := atomic.LoadUint32(&d.octetCount)
 	packets := atomic.LoadUint32(&d.packetCount)
-	//log.Debugf("diffTs:%d, octets:%d, packets:%d", diffTs, octets, packets)
+	//log.Debugf("snOffset:%d, tsOffset:%d", d.snOffset, d.tsOffset)
 	return &rtcp.SenderReport{
 		SSRC:        d.ssrc,
 		NTPTime:     nowNTP,
@@ -284,18 +289,24 @@ func (d *DownTrack) writeSimpleRTP(extPkt buffer.ExtPacket) error {
 		d.lastTS = newTS
 		d.lastPacketMs = extPkt.Arrival / 1e6
 	}
-	// 修改rtp报头的timestamp，sequenceNumber和ssrc
-	hdr := extPkt.Packet.Header
-	hdr.PayloadType = d.payloadType
-	hdr.Timestamp = newTS
-	hdr.SequenceNumber = newSN
-	hdr.SSRC = d.ssrc
 
-	_, err := d.writeStream.WriteRTP(&hdr, extPkt.Packet.Payload)
-	return err
+	// 修改rtp报头的timestamp，sequenceNumber和ssrc
+	extPkt.Packet.PayloadType = d.payloadType
+	extPkt.Packet.Timestamp = newTS
+	extPkt.Packet.SequenceNumber = newSN
+	extPkt.Packet.SSRC = d.ssrc
+
+	d.pacer.Enqueue(pacer.Packet{
+		Header:      &extPkt.Packet.Header,
+		Payload:     extPkt.Packet.Payload,
+		WriteStream: d.writeStream,
+	})
+
+	return nil
 }
 
 func (d *DownTrack) writeSimulcastRTP(extPkt buffer.ExtPacket) error {
+	//log.Debugf("send rtp")
 	// 先检查数据包SSRC是否与之前不同 如果不同，说明视频源已经改变
 	reSync := d.reSync.get()
 	if d.lastSSRC != extPkt.Packet.SSRC || reSync {
@@ -369,8 +380,13 @@ func (d *DownTrack) writeSimulcastRTP(extPkt buffer.ExtPacket) error {
 	extPkt.Packet.Header.SSRC = d.ssrc
 	extPkt.Packet.Header.PayloadType = d.payloadType
 
-	_, err := d.writeStream.WriteRTP(&extPkt.Packet.Header, extPkt.Packet.Payload)
-	return err
+	d.pacer.Enqueue(pacer.Packet{
+		Header:      &extPkt.Packet.Header,
+		Payload:     extPkt.Packet.Payload,
+		WriteStream: d.writeStream,
+	})
+
+	return nil
 }
 
 // handleRTCP 处理来自sub.pc的各种RTCP报文
@@ -418,6 +434,7 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 			if expectedMinBitrate == 0 || expectedMinBitrate > uint64(p.Bitrate) {
 				expectedMinBitrate = uint64(p.Bitrate)
 			}
+			d.pacer.SetTargetBitrate(uint64(p.Bitrate))
 		case *rtcp.ReceiverReport:
 			//log.Debugf("recv RR...")
 			//RR报文，记录所有ReceptionReport里面的最大丢包率
@@ -427,28 +444,31 @@ func (d *DownTrack) handleRTCP(bytes []byte) {
 				}
 			}
 		case *rtcp.TransportLayerNack:
-			log.Debugf("recv nack...")
 			if d.sequencer != nil {
 				var nackedPackets []packetMeta
 				for _, pair := range p.Nacks {
 					nackedPackets = append(nackedPackets, d.sequencer.getSeqNoPairs(pair.PacketList())...)
 				}
-				if err = d.receiver.RetransmitPackets(d, nackedPackets); err != nil {
-					return
+
+				if len(nackedPackets) > 0 {
+					log.Debugf("recv nack...")
+					if err = d.receiver.RetransmitPackets(d, nackedPackets); err != nil {
+						return
+					}
 				}
 			}
 		case *rtcp.TransportLayerCC:
 			log.Infof("twcc")
 		}
+	}
+	// 获取接收端带宽值和丢包率情况后，进入simulcast切换逻辑
+	//log.Debugf("maxRatePacketLoss:%d", maxRatePacketLoss)
+	if d.trackType == SimulcastDownTrack && maxRatePacketLoss != 0 || expectedMinBitrate != 0 {
+		d.handlerLayerChange(maxRatePacketLoss, expectedMinBitrate)
+	}
 
-		// 获取接收端带宽值和丢包率情况后，进入simulcast切换逻辑
-		if d.trackType == SimulcastDownTrack && (maxRatePacketLoss != 0 || expectedMinBitrate != 0) {
-			d.handlerLayerChange(maxRatePacketLoss, expectedMinBitrate)
-		}
-
-		if len(fwdPkts) > 0 {
-			d.receiver.SendRTCP(fwdPkts)
-		}
+	if len(fwdPkts) > 0 {
+		d.receiver.SendRTCP(fwdPkts)
 	}
 }
 
@@ -457,7 +477,7 @@ func (d *DownTrack) handlerLayerChange(maxRatePacketLoss uint8, expectedMinBitra
 	spatialLayer := atomic.LoadInt32(&d.spatialLayer)
 	currentLayer := int64(spatialLayer & 0x0f)
 	targetLayer := int64(spatialLayer >> 16)
-	log.Infof("switch layer, currentLayer %d, targetLayer %d", currentLayer, targetLayer)
+
 	if targetLayer == currentLayer {
 		if time.Now().After(d.simulcast.switchDelay) {
 			brs := d.receiver.GetBitrate()
@@ -491,6 +511,7 @@ func (d *DownTrack) SwitchSpatialLayer(targetLayer int64) {
 		currentLayer := uint16(layer)
 		currentTargetLayer := uint16(layer >> 16)
 
+		log.Infof("switch layer, currentLayer %d, currentTargetLayer %d", currentLayer, currentTargetLayer)
 		//在上一次切换完成之前，或者当前层已经是目标层，不能切换
 		if currentLayer != currentTargetLayer || currentLayer == uint16(targetLayer) {
 			log.Infof("switching or layer has changed, can not switch now")

@@ -1,7 +1,9 @@
 package sfu
 
 import (
+	"fmt"
 	"io"
+	"mini-sfu/internal/pacer"
 	"sync"
 	"time"
 
@@ -233,14 +235,18 @@ func (w *WebRTCReceiver) writeRTP(layer int) {
 
 // RetransmitPackets 根据偏移后的SN从sequencer里面找到发送包号，并根据发送包号从buffer中取出缓存的packet
 func (w *WebRTCReceiver) RetransmitPackets(track *DownTrack, packets []packetMeta) error {
-	log.Debugf("send RetransmitPackets")
+	log.Debugf("send RetransmitPackets, packet len: %d", len(packets))
+	for _, pkt := range packets {
+		fmt.Println("pkt.targetSeqNo:", pkt.targetSeqNo, "pkt.sourceSeqNo:", pkt.sourceSeqNo, "pkt.timestamp:", pkt.timestamp)
+	}
 	if w.nackWorker.Stopped() {
 		return io.ErrClosedPipe
 	}
 
+	var pktBuff []byte
 	w.nackWorker.Submit(func() {
 		for _, meta := range packets {
-			pktBuff := packetFactory.Get().([]byte)
+			pktBuff = packetFactory.Get().([]byte)
 			buff := w.buffers[meta.layer]
 			if buff == nil {
 				break
@@ -257,16 +263,21 @@ func (w *WebRTCReceiver) RetransmitPackets(track *DownTrack, packets []packetMet
 			if err = pkt.Unmarshal(pktBuff[:pktLen]); err != nil {
 				continue
 			}
+			fmt.Println("重传数据包的序号是：", pkt.SequenceNumber, "时间戳是：", pkt.Timestamp)
 
 			// 将packet的元数据修改
 			pkt.Header.SequenceNumber = meta.targetSeqNo
 			pkt.Header.Timestamp = meta.timestamp
+			pkt.Header.SSRC = track.ssrc
+			pkt.Header.PayloadType = track.payloadType
 
-			if _, err = track.writeStream.WriteRTP(&pkt.Header, pkt.Payload); err != nil {
-				log.Errorf("Writing rtx packet err: %v", err)
-			}
-			packetFactory.Put(pktBuff)
+			track.pacer.Enqueue(pacer.Packet{
+				Header:      &pkt.Header,
+				Payload:     pkt.Payload,
+				WriteStream: track.writeStream,
+			})
 		}
+		packetFactory.Put(pktBuff)
 	})
 	return nil
 }

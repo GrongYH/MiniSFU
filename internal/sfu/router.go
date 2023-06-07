@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"fmt"
 	"sync"
 
 	"mini-sfu/internal/buffer"
@@ -109,6 +110,7 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 
 	recv, ok := r.receivers[trackID]
 	if !ok {
+		log.Debugf("receiver is not created, start to publish, rid: %s", rid)
 		recv = NewWebRTCReceiver(receiver, track, r.id)
 		r.receivers[trackID] = recv
 		// 所有receiver的rtcp报文统一写入到router的rtcpCh，由router发送给publisher
@@ -118,16 +120,10 @@ func (r *router) AddReceiver(receiver *webrtc.RTPReceiver, track *webrtc.TrackRe
 			delete(r.receivers, trackID)
 			r.Unlock()
 		})
-		if len(rid) == 0 || r.config.Simulcast.BestQualityFirst && rid == fullResolution ||
-			!r.config.Simulcast.BestQualityFirst && rid == quarterResolution {
-			publish = true
-		}
-	} else if r.config.Simulcast.BestQualityFirst && rid == fullResolution ||
-		!r.config.Simulcast.BestQualityFirst && rid == quarterResolution ||
-		!r.config.Simulcast.BestQualityFirst && rid == halfResolution {
 		publish = true
 	}
 
+	fmt.Println("publish is %d", publish)
 	// 添加上行Track
 	recv.AddUpTrack(track, buff)
 	buff.Bind(receiver.GetParameters(), buffer.Options{

@@ -48,7 +48,7 @@ func NewPublisher(id string, session *Session, cfg WebRTCTransportConfig) (*Publ
 		log.Debugf("Peer %s | got remote track id: %s | mediaSSRC: %d rid :%s | streamID: %s",
 			p.id, track.ID(), track.SSRC(), track.RID(), track.StreamID())
 
-		// 每当收到一个UpTrack时，新建一个Receiver用来接收。
+		// 每当收到一个UpTrack时，新建一个Receiver用来接收upTrack。
 		// 同时让Router管理该Receiver
 		r, pub := p.router.AddReceiver(receiver, track)
 		if pub {

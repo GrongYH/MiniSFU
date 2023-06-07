@@ -63,7 +63,7 @@ func (p *JSONSignal) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonr
 		}
 
 		p.OnIceCandidate = func(candidate *webrtc.ICECandidateInit, target int) {
-			log.Debugf("send ice to client, %s", candidate.Candidate)
+			//log.Debugf("send ice to client, %s", candidate.Candidate)
 			if err := conn.Notify(ctx, "trickle", Trickle{
 				Candidate: *candidate,
 				Target:    target,
@@ -122,7 +122,7 @@ func (p *JSONSignal) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonr
 			replyError(err)
 			break
 		}
-		log.Infof("trickle candidate %s", trickle.Candidate.Candidate)
+		//log.Infof("trickle candidate %s", trickle.Candidate.Candidate)
 
 		err = p.Trickle(trickle.Candidate, trickle.Target)
 		if err != nil {
